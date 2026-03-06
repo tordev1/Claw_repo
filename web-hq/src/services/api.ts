@@ -119,9 +119,9 @@ export const tasksApi = {
     due_date?: string;
     estimated_hours?: number;
     tags?: string[];
-  }) => fetchApi(`/api/projects/${projectId}/tasks`, {
+  }) => fetchApi(`/api/tasks`, {
     method: 'POST',
-    body: JSON.stringify(data)
+    body: JSON.stringify({ ...data, project_id: projectId })
   }),
 
   // Get all tasks for a project
@@ -153,7 +153,7 @@ export const tasksApi = {
 
   // Decline task assignment
   decline: (taskId: string, reason?: string) =>
-    fetchApi(`/api/tasks/${taskId}/decline`, {
+    fetchApi(`/api/tasks/${taskId}/reject`, {
       method: 'POST',
       body: JSON.stringify(reason ? { reason } : {})
     }),
@@ -299,6 +299,7 @@ export const healthApi = {
 export const machinesApi = {
   list: () => fetchApi('/api/machines'),
   get: (id: string) => fetchApi(`/api/machines/${id}`),
+  delete: (id: string) => fetchApi(`/api/machines/${id}`, { method: 'DELETE' }),
 };
 
 // Agent Types
@@ -351,8 +352,8 @@ export const agentsApi = {
   reject: (id: string) => fetchApi(`/api/agents/${id}/reject`, { method: 'POST' }),
   sendMessage: (id: string, content: string) =>
     fetchApi(`/api/agents/${id}/message`, { method: 'POST', body: JSON.stringify({ content }) }),
-  assignToProject: (agentId: string, projectId: string) =>
-    fetchApi(`/api/agents/${agentId}/projects`, { method: 'POST', body: JSON.stringify({ project_id: projectId }) }),
+  assignToProject: (agentId: string, projectId: string, role = 'contributor') =>
+    fetchApi(`/api/projects/${projectId}/assign-agent`, { method: 'POST', body: JSON.stringify({ agent_id: agentId, role }) }),
 };
 
 // Admin API
@@ -373,6 +374,10 @@ export const adminApi = {
 
   // Get all users
   getUsers: () => fetchApi('/api/admin/users'),
+
+  // Permanently delete an agent
+  deleteAgent: (agentId: string) =>
+    fetchApi(`/api/admin/agents/${agentId}`, { method: 'DELETE' }),
 };
 
 // Credits API for token usage (deprecated - use tokensApi instead)

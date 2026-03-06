@@ -14,7 +14,7 @@ import {
   Briefcase,
   Flag
 } from 'lucide-react';
-import { tasksApi, projectsApi, agentsApi, type Agent } from '../../services/api';
+import { tasksApi, projectsApi, agentsApi, projectAgentsApi, type Agent } from '../../services/api';
 
 interface TaskCreationModalProps {
   projectId?: string;
@@ -98,11 +98,21 @@ export default function TaskCreationModal({
 
   const fetchProjectAgents = async (pid: string) => {
     try {
-      const res = await projectsApi.get(pid);
-      // Get agents assigned to this project
-      const projectAgentIds = res.agents?.map((a: any) => a.id) || [];
-      const filteredAgents = agents.filter(a => projectAgentIds.includes(a.id));
-      setProjectAgents(filteredAgents);
+      const res = await projectAgentsApi.listByProject(pid);
+      const projectAgentList: Agent[] = (res.agents || res || []).map((a: any) => ({
+        id: a.id || a.agent_id,
+        name: a.name || a.agent_name || '',
+        handle: a.handle || '',
+        role: a.role || '',
+        status: a.status || 'offline',
+        skills: a.skills || [],
+        specialties: a.specialties || [],
+        experience_level: a.experience_level || '',
+        is_approved: true,
+        is_active: true,
+        created_at: a.created_at || '',
+      }));
+      setProjectAgents(projectAgentList);
     } catch (err) {
       setProjectAgents([]);
     }
@@ -161,8 +171,8 @@ export default function TaskCreationModal({
       const response = await tasksApi.create(selectedProjectId, taskData);
       
       // If assignee selected, assign the task
-      if (selectedAssigneeId && response.task?.id) {
-        await tasksApi.assign(response.task.id, selectedAssigneeId);
+      if (selectedAssigneeId && response?.id) {
+        await tasksApi.assign(response.id, selectedAssigneeId);
       }
 
       // Reset form

@@ -131,6 +131,16 @@ async function buildServer() {
     return { alive: true, timestamp: new Date().toISOString() };
   });
 
+  // Serve agentCLI.js for easy download on remote machines
+  fastify.get('/agentCLI.js', async (request, reply) => {
+    const path = require('path');
+    const fs = require('fs');
+    const filePath = path.join(__dirname, '..', 'agentCLI.js');
+    reply.header('Content-Type', 'application/javascript');
+    reply.header('Content-Disposition', 'attachment; filename="agentCLI.js"');
+    return reply.send(fs.createReadStream(filePath));
+  });
+
   // ============================================================================
   // PROJECT ROUTES
   // ============================================================================
@@ -274,6 +284,7 @@ async function buildServer() {
   // ============================================================================
   fastify.get('/api/machines', { preHandler: authMiddleware }, routes.listMachinesRoute);
   fastify.post('/api/machines/register', routes.registerMachineRoute);
+  fastify.delete('/api/machines/:id', { preHandler: authMiddleware }, routes.deleteMachineRoute);
   fastify.post('/api/machines/:machineId/agents/:agentId', { preHandler: authMiddleware }, routes.linkMachineAgentRoute);
   fastify.delete('/api/machines/:machineId/agents/:agentId', { preHandler: authMiddleware }, routes.unlinkMachineAgentRoute);
 
@@ -367,7 +378,10 @@ async function buildServer() {
   fastify.get('/api/agents/:id', { preHandler: optionalAuthMiddleware }, routes.getManagerAgentRoute);
   fastify.post('/api/agents/register', routes.registerManagerAgentRoute);
   fastify.post('/api/agents/:id/approve', { preHandler: authMiddleware }, routes.approveManagerAgentRoute);
+  fastify.post('/api/agents/:id/reject', { preHandler: authMiddleware }, routes.rejectManagerAgentRoute);
   fastify.post('/api/admin/agents/:id/approve', { preHandler: authMiddleware }, routes.approveManagerAgentRoute);
+  fastify.post('/api/admin/agents/:id/reject', { preHandler: authMiddleware }, routes.rejectManagerAgentRoute);
+  fastify.delete('/api/admin/agents/:id', { preHandler: authMiddleware }, routes.deleteManagerAgentRoute);
   fastify.get('/api/admin/agents/pending', { preHandler: authMiddleware }, routes.listPendingAgentsRoute);
   fastify.get('/api/admin/agents/approved', { preHandler: authMiddleware }, routes.listApprovedAgentsRoute);
   fastify.get('/api/admin/users', { preHandler: authMiddleware }, routes.listUsersRoute);
@@ -445,6 +459,11 @@ async function buildServer() {
       channels: channelList,
       projectIds
     });
+
+    // Server-side keepalive ping every 30s
+    const heartbeat = setInterval(() => {
+      if (socket.readyState === 1) socket.ping();
+    }, 30000);
 
     // Send welcome message
     setTimeout(() => {
@@ -585,6 +604,7 @@ async function buildServer() {
 
     // Handle disconnect
     socket.on('close', () => {
+      clearInterval(heartbeat);
       wsManager.unregister(socket);
     });
 

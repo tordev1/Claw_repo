@@ -766,8 +766,8 @@ async function acceptTask(request, reply) {
     return { error: 'Task not found' };
   }
 
-  // Verify agent is assigned to this task
-  if (task.agent_id !== userId) {
+  // Verify agent is assigned to this task (admin can act on behalf of assigned agent)
+  if (task.agent_id !== userId && request.user?.role !== 'admin') {
     reply.code(403);
     return { error: 'Only assigned agent can accept this task' };
   }
@@ -892,8 +892,8 @@ async function startTask(request, reply) {
     return { error: 'Task not found' };
   }
 
-  // Verify agent is assigned to this task
-  if (task.agent_id !== userId) {
+  // Verify agent is assigned to this task (admin can act on behalf of assigned agent)
+  if (task.agent_id !== userId && request.user?.role !== 'admin') {
     reply.code(403);
     return { error: 'Only assigned agent can start this task' };
   }
@@ -953,8 +953,8 @@ async function completeTask(request, reply) {
     return { error: 'Task not found' };
   }
 
-  // Verify agent is assigned to this task
-  if (task.agent_id !== userId) {
+  // Verify agent is assigned to this task (admin can act on behalf of assigned agent)
+  if (task.agent_id !== userId && request.user?.role !== 'admin') {
     reply.code(403);
     return { error: 'Only assigned agent can complete this task' };
   }
@@ -3054,6 +3054,9 @@ async function registerManagerAgentRoute(request, reply) {
     VALUES (?, ?, ?, ?, ?, 'offline', ?, ?, ?, FALSE, ?, ?)
   `).run(id, name, normalizedHandle, email || null, role, JSON.stringify(skills), JSON.stringify(specialties), experience_level, now, now);
 
+  // Auto-create a session token so the agent can operate without admin credentials
+  const session = await createSession('user-scorpion-001');
+
   reply.code(201);
   return {
     id,
@@ -3062,8 +3065,36 @@ async function registerManagerAgentRoute(request, reply) {
     role,
     status: 'offline',
     is_approved: false,
+    token: session.token,
     message: 'Registration submitted. Awaiting admin approval.'
   };
+}
+
+// DELETE /api/agents/:id - Permanently delete a manager agent (admin only)
+async function deleteManagerAgentRoute(request, reply) {
+  const db = getDb();
+  const { id } = request.params;
+  const user = request.user;
+
+  if (!user || user.role !== 'admin') {
+    reply.code(403);
+    return { error: 'Admin access required' };
+  }
+
+  const agent = db.prepare('SELECT id, name FROM manager_agents WHERE id = ?').get(id);
+  if (!agent) {
+    reply.code(404);
+    return { error: 'Agent not found' };
+  }
+
+  // Delete DM channels for this agent (no FK, must be manual; channel messages cascade)
+  db.prepare('DELETE FROM channels WHERE dm_agent_id = ?').run(id);
+
+  // Delete the agent (CASCADE handles: agent_projects, agent_notifications, machine_agents)
+  // SET NULL handles: messages.author_agent_id, task_assignment_history.agent_id
+  db.prepare('DELETE FROM manager_agents WHERE id = ?').run(id);
+
+  return { success: true, message: `Agent ${agent.name} deleted` };
 }
 
 // POST /api/agents/:id/approve - Approve manager agent (admin only)
@@ -3137,6 +3168,48 @@ async function approveManagerAgentRoute(request, reply) {
     approved_by: user.id,
     approved_at: now,
     message: 'Agent approved successfully'
+  };
+}
+
+// POST /api/agents/:id/reject - Reject manager agent (admin only)
+async function rejectManagerAgentRoute(request, reply) {
+  const db = getDb();
+  const { id } = request.params;
+  const user = request.user;
+  const { reason } = request.body || {};
+
+  if (!user || user.role !== 'admin') {
+    reply.code(403);
+    return { error: 'Admin access required' };
+  }
+
+  const agent = db.prepare('SELECT * FROM manager_agents WHERE id = ?').get(id);
+  if (!agent) {
+    reply.code(404);
+    return { error: 'Agent not found' };
+  }
+
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    UPDATE manager_agents
+    SET is_approved = FALSE, status = 'offline', updated_at = ?
+    WHERE id = ?
+  `).run(now, id);
+
+  db.prepare(`
+    INSERT INTO agent_notifications (id, agent_id, type, title, content, data, created_at)
+    VALUES (?, ?, 'rejected', 'Registration Not Approved', ?, ?, ?)
+  `).run(generateId(), id, reason || 'Your registration was not approved by an administrator.', JSON.stringify({ rejected_by: user.id, reason }), now);
+
+  return {
+    id,
+    name: agent.name,
+    is_approved: false,
+    status: 'offline',
+    rejected_by: user.id,
+    rejected_at: now,
+    message: 'Agent rejected'
   };
 }
 
@@ -3404,6 +3477,29 @@ async function listMachinesRoute(request, reply) {
     reply.code(500);
     return { error: err.message };
   }
+}
+
+// DELETE /api/machines/:id - Delete a machine (admin only)
+async function deleteMachineRoute(request, reply) {
+  const db = getDb();
+  const { id } = request.params;
+  const user = request.user;
+
+  if (!user || user.role !== 'admin') {
+    reply.code(403);
+    return { error: 'Admin access required' };
+  }
+
+  const machine = db.prepare('SELECT id FROM machines WHERE id = ?').get(id);
+  if (!machine) {
+    reply.code(404);
+    return { error: 'Machine not found' };
+  }
+
+  db.prepare('DELETE FROM machine_agents WHERE machine_id = ?').run(id);
+  db.prepare('DELETE FROM machines WHERE id = ?').run(id);
+
+  return { id, deleted: true };
 }
 
 // ============================================================================
@@ -3961,6 +4057,7 @@ module.exports = {
   // Machines
   registerMachineRoute,
   listMachinesRoute,
+  deleteMachineRoute,
 
   // Project Assignment (Phase 2)
   assignAgentToProjectRouteV2,
@@ -3974,6 +4071,8 @@ module.exports = {
   getManagerAgentRoute,
   registerManagerAgentRoute,
   approveManagerAgentRoute,
+  rejectManagerAgentRoute,
+  deleteManagerAgentRoute,
   updateManagerAgentStatusRoute,
   getAgentNotificationsRoute,
   markNotificationReadRoute,

@@ -43,8 +43,8 @@ export default function ProjectAssignAgentDialog({
     try {
       setLoading(true);
       setError(null);
-      const response = await agentsApi.list({ status: 'approved' });
-      setAgents(response.agents || []);
+      const response = await agentsApi.list({ is_approved: 'true' } as any);
+      setAgents((response.agents || []).filter((a: any) => a.is_approved));
     } catch (err: any) {
       console.error('Failed to fetch agents:', err);
       setError(err.message || 'Failed to load agents');

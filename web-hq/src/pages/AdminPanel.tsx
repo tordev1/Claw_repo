@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { adminApi } from '../services/api';
-import { Shield, CheckCircle, XCircle, Loader2, RefreshCw, Search, Bot, Users, UserCheck } from 'lucide-react';
+import { Shield, CheckCircle, XCircle, Loader2, RefreshCw, Search, Bot, Users, UserCheck, Trash2 } from 'lucide-react';
 
 export default function AdminPanel() {
   const [tab, setTab] = useState<'pending' | 'approved' | 'users'>('pending');
@@ -39,6 +39,18 @@ export default function AdminPanel() {
   const reject = async (id: string) => {
     setActLoad(id);
     try { await adminApi.rejectAgent(id); setOk('Agent rejected'); setPending(p => p.filter(a => a.id !== id)); }
+    catch (e: any) { setError(e.message); }
+    finally { setActLoad(null); }
+  };
+  const deleteAgent = async (id: string, name: string) => {
+    if (!window.confirm(`Permanently delete agent "${name}"? This cannot be undone.`)) return;
+    setActLoad(id);
+    try {
+      await adminApi.deleteAgent(id);
+      setOk(`Agent ${name} deleted`);
+      setPending(p => p.filter(a => a.id !== id));
+      setApproved(a => a.filter(a => a.id !== id));
+    }
     catch (e: any) { setError(e.message); }
     finally { setActLoad(null); }
   };
@@ -149,6 +161,10 @@ export default function AdminPanel() {
                           style={{ ...mono, fontSize: 10, color: '#ef4444', background: '#ef444415', border: '1px solid #ef444433', borderRadius: 2, padding: '3px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, opacity: actLoad === a.id ? 0.5 : 1 }}>
                           <XCircle size={10} /> Reject
                         </button>
+                        <button onClick={() => deleteAgent(a.id, a.name)} disabled={actLoad === a.id}
+                          style={{ ...mono, fontSize: 10, color: '#94a3b8', background: '#94a3b815', border: '1px solid #94a3b833', borderRadius: 2, padding: '3px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, opacity: actLoad === a.id ? 0.5 : 1 }}>
+                          <Trash2 size={10} /> Delete
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -166,7 +182,7 @@ export default function AdminPanel() {
             <p style={{ ...mono, fontSize: 11, color: 'var(--text-lo)', padding: '32px 0', textAlign: 'center' }}>— no approved agents —</p>
           ) : (
             <table className="ops-table w-full">
-              <thead><tr><th>Agent</th><th>Role</th><th>Approved By</th><th>Status</th></tr></thead>
+              <thead><tr><th>Agent</th><th>Role</th><th>Approved By</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
               <tbody>
                 {filtApproved.map(a => (
                   <tr key={a.id}>
@@ -174,6 +190,12 @@ export default function AdminPanel() {
                     <td style={{ color: 'var(--text-lo)', fontSize: 10, textTransform: 'uppercase' }}>{a.role}</td>
                     <td style={{ color: 'var(--text-lo)', fontSize: 10 }}>{a.approvedBy || '—'}</td>
                     <td><span style={{ ...mono, fontSize: 9, color: a.status === 'active' ? '#10b981' : 'var(--text-lo)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{a.status}</span></td>
+                    <td style={{ textAlign: 'right' }}>
+                      <button onClick={() => deleteAgent(a.id, a.name)} disabled={actLoad === a.id}
+                        style={{ ...mono, fontSize: 10, color: '#ef4444', background: '#ef444415', border: '1px solid #ef444433', borderRadius: 2, padding: '3px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto', opacity: actLoad === a.id ? 0.5 : 1 }}>
+                        {actLoad === a.id ? <Loader2 size={10} className="animate-spin" /> : <Trash2 size={10} />} Delete
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

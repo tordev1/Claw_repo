@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(netstat -ano)",
+      "Bash(findstr :3001)",
+      "Bash(findstr \":8080\")",
+      "Bash(ss -tlnp)"
+    ]
+  }
+}

@@ -23,8 +23,6 @@ const get = (f, d) => { const i = args.indexOf(f); return i !== -1 ? args[i + 1]
 const AGENT_NAME = get('--name', 'TestAgent');
 const AGENT_HANDLE = get('--handle', 'testagent');
 const AGENT_SKILLS = get('--skills', 'general,testing').split(',').map(s => s.trim());
-const ADMIN_LOGIN = get('--login', process.env.ADMIN_LOGIN || null);
-const ADMIN_PASS = get('--password', process.env.ADMIN_PASS || null);
 
 const C = { G: '\x1b[32m', Y: '\x1b[33m', C: '\x1b[36m', R: '\x1b[31m', B: '\x1b[1m', X: '\x1b[0m', A: '\x1b[33m' };
 const log = (tag, msg, c = C.X) => console.log(`${c}[${new Date().toLocaleTimeString()}] [${tag}]${C.X} ${msg}`);
@@ -94,7 +92,7 @@ function wsConnect(agentId, userToken, onMsg) {
     const u = new URL(`${WS_BASE}/ws?token=${encodeURIComponent(userToken)}`);
     const lib = u.protocol === 'wss:' ? tls : net;
     const port = parseInt(u.port) || (u.protocol === 'wss:' ? 443 : 80);
-    const key = Buffer.from(Math.random().toString(36)).toString('base64');
+    const key = Buffer.from(Array.from({length: 16}, () => Math.floor(Math.random() * 256))).toString('base64');
 
     const sock = lib.connect({ host: u.hostname, port }, () => {
         sock.write(
@@ -128,16 +126,26 @@ function wsConnect(agentId, userToken, onMsg) {
     });
 
     sock.on('error', e => log('WS', e.message, C.R));
+
+    const keepalive = setInterval(() => { if (sock.writable) wsSend(sock, '', 9); }, 25000);
+
     sock.on('close', () => {
+        clearInterval(keepalive);
         log('WS', 'Disconnected — reconnecting in 5s...', C.Y);
         setTimeout(() => wsConnect(agentId, userToken, onMsg), 5000);
     });
 }
 
 function wsSend(sock, data, opcode = 1) {
-    const p = Buffer.from(data);
-    if (p.length < 126) sock.write(Buffer.concat([Buffer.from([opcode | 0x80, p.length]), p]));
-    else sock.write(Buffer.concat([Buffer.from([opcode | 0x80, 126, p.length >> 8, p.length & 0xff]), p]));
+    const p = Buffer.from(typeof data === 'string' ? data : '');
+    const mask = Buffer.allocUnsafe(4);
+    mask.writeUInt32BE((Math.random() * 0xFFFFFFFF) >>> 0, 0);
+    const masked = Buffer.allocUnsafe(p.length);
+    for (let i = 0; i < p.length; i++) masked[i] = p[i] ^ mask[i % 4];
+    const header = p.length < 126
+        ? Buffer.from([0x80 | opcode, 0x80 | p.length])
+        : Buffer.from([0x80 | opcode, 0x80 | 126, p.length >> 8, p.length & 0xff]);
+    sock.write(Buffer.concat([header, mask, masked]));
 }
 
 // ── Task handling ─────────────────────────────────────────────────────────────
@@ -182,24 +190,7 @@ async function main() {
     console.log(`║    PROJECT-CLAW  AGENT  CLI  v3      ║`);
     console.log(`╚══════════════════════════════════════╝${C.X}\n`);
 
-    // ── Step 1: Admin login ───────────────────────────────────────────────────
-    log('AUTH', 'Admin credentials needed to authenticate this agent session.', C.C);
-    const login = ADMIN_LOGIN || await prompt('  Admin login: ');
-    const password = ADMIN_PASS || await prompt('  Password:    ', true);
-
-    const loginRes = await req('POST', '/api/auth/login', { login, password });
-    if (loginRes.status !== 200) {
-        log('AUTH', `Login failed: ${JSON.stringify(loginRes.body)}`, C.R);
-        process.exit(1);
-    }
-    const userToken = loginRes.body.token || loginRes.body.session?.token;
-    if (!userToken) {
-        log('AUTH', `No token in login response: ${JSON.stringify(loginRes.body)}`, C.R);
-        process.exit(1);
-    }
-    log('AUTH', `✓ Logged in as ${login}`, C.G);
-
-    // ── Step 2: Register agent ────────────────────────────────────────────────
+    // ── Step 1: Register agent (no admin credentials needed) ─────────────────
     log('INIT', `Registering agent "${AGENT_NAME}" @${AGENT_HANDLE}...`, C.C);
     const regRes = await req('POST', '/api/agents/register', {
         name: AGENT_NAME, handle: AGENT_HANDLE,
@@ -207,9 +198,10 @@ async function main() {
         skills: AGENT_SKILLS, preferred_model: 'gpt-4o', experience_level: 'expert',
     });
 
-    let agentId;
+    let agentId, userToken;
     if (regRes.status === 201 || regRes.status === 200) {
         agentId = regRes.body.id || regRes.body.agent?.id;
+        userToken = regRes.body.token;
         log('INIT', `✓ Registered. ID: ${agentId}`, C.G);
     } else if (regRes.status === 409) {
         log('INIT', `Handle @${AGENT_HANDLE} already exists — run node reset-db.js first.`, C.R);
@@ -219,10 +211,10 @@ async function main() {
         process.exit(1);
     }
 
-    // ── Step 3: Wait for approval ─────────────────────────────────────────────
+    // ── Step 2: Wait for approval ─────────────────────────────────────────────
     log('INIT', ``, C.X);
     log('INIT', `${C.B}Waiting for admin approval...${C.X}`, C.Y);
-    log('INIT', `Go to: ${C.C}http://localhost:5173/admin${C.X} → approve @${AGENT_HANDLE}`, C.X);
+    log('INIT', `Ask admin to approve @${AGENT_HANDLE} at the /admin panel`, C.X);
 
     let approved = false;
     while (!approved) {
@@ -235,12 +227,12 @@ async function main() {
     console.log('');
     log('INIT', '✅ Agent approved!', C.G);
 
-    // ── Step 4: Go online ──────────────────────────────────────────────────────
+    // ── Step 3: Go online ──────────────────────────────────────────────────────
     const onlineRes = await req('POST', `/api/agents/${agentId}/status`, { status: 'online' }, userToken);
     if (onlineRes.status === 200) log('INIT', '✅ Status set to ONLINE', C.G);
     else log('INIT', `Status update: ${JSON.stringify(onlineRes.body)}`, C.Y);
 
-    // ── Step 5: WebSocket ──────────────────────────────────────────────────────
+    // ── Step 4: WebSocket ──────────────────────────────────────────────────────
     const activeTasks = new Set();
 
     wsConnect(agentId, userToken, async msg => {

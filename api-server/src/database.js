@@ -572,25 +572,6 @@ class SQLiteAdapter {
       console.log('✅ Created admin user Scorpion  —  password: Scorpion123');
     }
 
-    // Insert Sigma as first Manager Agent (if not exists by id OR handle)
-    const sigmaExists = this.db.prepare("SELECT id FROM manager_agents WHERE id = 'agent-sigma-001' OR handle = '@sigma'").get();
-    if (!sigmaExists) {
-      this.db.prepare(`
-        INSERT INTO manager_agents (id, name, handle, role, status, skills, is_approved, approved_by, approved_at)
-        VALUES (
-          'agent-sigma-001',
-          'Sigma',
-          '@sigma',
-          'task_lead',
-          'online',
-          '["planning", "architecture", "coordination"]',
-          TRUE,
-          'user-scorpion-001',
-          datetime('now')
-        )
-      `).run();
-      console.log('✅ Created Sigma as first Manager Agent');
-    }
 
     // ========== PHASE 3: TASK ASSIGNMENT SYSTEM ==========
 

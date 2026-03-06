@@ -3,19 +3,10 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { projectsApi, projectAgentsApi, chatApi, type Agent } from '../services/api';
 import ProjectAssignAgentDialog from '../components/ProjectAssignAgentDialog';
 import TaskList from '../components/TaskList';
-import { 
-  ArrowLeft, 
-  Edit, 
-  Pause, 
-  Settings, 
-  Cpu, 
-  HardDrive, 
-  Wifi,
-  Github,
-  Cloud,
-  CreditCard,
-  Rocket,
-  FileText,
+import {
+  ArrowLeft,
+  Pause,
+  Settings,
   CheckCircle2,
   Clock,
   AlertCircle,
@@ -252,8 +243,8 @@ export default function ProjectDetail() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-8 h-8 text-primary animate-spin" />
-        <span className="ml-3 text-slate-400">Loading project...</span>
+        <Loader2 size={16} className="animate-spin" style={{ color: 'var(--amber)' }} />
+        <span className="ml-3" style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-mid)' }}>LOADING PROJECT...</span>
       </div>
     );
   }
@@ -261,12 +252,9 @@ export default function ProjectDetail() {
   if (!project) {
     return (
       <div className="text-center py-12">
-        <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
-        <h1 className="text-2xl font-bold text-slate-50">Project not found</h1>
-        <p className="text-slate-400 mt-2">{error || 'The project you are looking for does not exist.'}</p>
-        <Link to="/projects" className="text-primary hover:underline mt-4 inline-block">
-          Back to projects
-        </Link>
+        <AlertCircle size={32} className="mx-auto mb-4" style={{ color: '#ef4444' }} />
+        <p style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-mid)' }}>{error || 'Project not found.'}</p>
+        <Link to="/projects" className="ops-btn inline-flex mt-4">Back to projects</Link>
       </div>
     );
   }
@@ -275,449 +263,196 @@ export default function ProjectDetail() {
   const completedTasks = projectTasks.filter(t => t.status === 'done');
 
   return (
-    <div className="space-y-6">
-      {/* Breadcrumb & Actions */}
+    <div className="space-y-4 animate-fade-up">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link to="/projects" className="text-slate-400 hover:text-slate-200">
-            <ArrowLeft className="w-5 h-5" />
+        <div className="flex items-center gap-3">
+          <Link to="/projects" style={{ color: 'var(--text-lo)', display: 'flex' }}>
+            <ArrowLeft size={16} />
           </Link>
-          <div className="flex items-center gap-2">
-            <span className={`w-3 h-3 rounded-full ${getProjectTypeDot(project.type)}`} />
-            <h1 className="text-2xl font-bold text-slate-50">{project.name}</h1>
+          <div>
+            <div className="ops-section-header" style={{ marginBottom: 2 }}>Project</div>
+            <div className="flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${getProjectTypeDot(project.type)}`} />
+              <h1 style={{ fontFamily: 'var(--font-mono)', fontSize: 20, fontWeight: 700, color: 'var(--text-hi)', letterSpacing: '-0.02em' }}>{project.name}</h1>
+              <span className={`ops-badge ${project.status === 'active' ? 'ops-badge-green' : project.status === 'standby' ? 'ops-badge-amber' : 'ops-badge-gray'}`}>
+                {project.status.toUpperCase()}
+              </span>
+            </div>
           </div>
-          <span className={`text-sm px-3 py-1 rounded-full ${getStatusBg(project.status)}`}>
-            {project.status}
-          </span>
         </div>
         <div className="flex items-center gap-2">
-          <button className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2 rounded-lg transition-colors">
-            <Edit className="w-4 h-4" />
-            Edit
+          <button onClick={handleStatusToggle} className="ops-btn">
+            {project?.status === 'active' ? <><Pause size={11} /> Pause</> : <><Play size={11} /> Start</>}
           </button>
-          <button 
-            onClick={handleStatusToggle}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
-              project?.status === 'active' 
-                ? 'bg-slate-700 hover:bg-slate-600 text-yellow-400' 
-                : 'bg-slate-700 hover:bg-slate-600 text-green-400'
-            }`}
-          >
-            {project?.status === 'active' ? (
-              <><Pause className="w-4 h-4" /> Pause</>
-            ) : (
-              <><Play className="w-4 h-4" /> Start</>
-            )}
-          </button>
-          <button className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-400 rounded-lg transition-colors">
-            <Settings className="w-5 h-5" />
-          </button>
+          <button className="ops-btn"><Settings size={11} /></button>
         </div>
-      </div>
-
-      {/* Subheader Info */}
-      <div className="flex items-center gap-4 text-slate-400 text-sm">
-        <span>{project.macMiniId}</span>
-        <span>•</span>
-        <span>{project.pmName || 'No PM assigned'}</span>
-        <span>•</span>
-        <span className={getStatusColor(project.status)}>● {project.status}</span>
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-slate-700">
-        <nav className="flex gap-6">
-          {['overview', 'tasks', 'workers', 'costs', 'resources', 'logs'].map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`pb-3 text-sm font-medium border-b-2 transition-colors capitalize ${
-                activeTab === tab
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              {tab}
-            </button>
-          ))}
-        </nav>
+      <div style={{ borderBottom: '1px solid var(--ink-4)', display: 'flex', gap: 0 }}>
+        {['overview', 'tasks', 'costs'].map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            style={{
+              fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600, letterSpacing: '0.08em',
+              textTransform: 'uppercase', padding: '8px 16px', background: 'none', border: 'none',
+              borderBottom: `2px solid ${activeTab === tab ? 'var(--amber)' : 'transparent'}`,
+              color: activeTab === tab ? 'var(--amber)' : 'var(--text-lo)', cursor: 'pointer',
+              marginBottom: -1, transition: 'color 0.15s'
+            }}
+          >
+            {tab}
+          </button>
+        ))}
       </div>
 
       {/* Tab Content */}
       {activeTab === 'overview' && (
         <>
-          {/* Overview Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Status Board */}
-            <div className="bg-slate-800 rounded-xl border border-slate-700 p-4">
-              <h3 className="font-semibold text-slate-50 mb-4">Status Board</h3>
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Status</span>
-                  <span className={`flex items-center gap-2 ${getStatusColor(project.status)}`}>
-                    <span className="w-2 h-2 rounded-full bg-current" />
-                    {project.status.charAt(0).toUpperCase() + project.status.slice(1)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Uptime</span>
-                  <span className="text-slate-200">14 days</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Last Activity</span>
-                  <span className="text-slate-200">{project.lastActivity || 'Never'}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Workers</span>
-                  <span className="text-slate-200">2/5 active</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Tasks</span>
-                  <span className="text-slate-200">{completedTasks.length} done / {activeTasks.length} ongoing</span>
-                </div>
+          {/* Stats row */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="ops-stat">
+              <div className="ops-label mb-2">Status</div>
+              <div className="ops-value" style={{ fontSize: '1rem', color: project.status === 'active' ? '#10b981' : project.status === 'standby' ? '#f59e0b' : 'var(--text-mid)' }}>
+                {project.status.toUpperCase()}
               </div>
             </div>
-
-        {/* Manager Agents */}
-        <div className="bg-slate-800 rounded-xl border border-slate-700 p-4">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-slate-50 flex items-center gap-2">
-              <Users className="w-5 h-5 text-indigo-400" />
-              Manager Agents ({projectAgents.length})
-            </h3>
-            <button
-              onClick={() => setShowAssignDialog(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
-            >
-              <UserPlus className="w-4 h-4" />
-              Assign
-            </button>
+            <div className="ops-stat">
+              <div className="ops-label mb-2">Agents</div>
+              <div className="ops-value">{projectAgents.length}</div>
+            </div>
+            <div className="ops-stat">
+              <div className="ops-label mb-2">Tasks Done</div>
+              <div className="ops-value" style={{ color: '#10b981' }}>{completedTasks.length}</div>
+            </div>
+            <div className="ops-stat">
+              <div className="ops-label mb-2">In Progress</div>
+              <div className="ops-value" style={{ color: '#f59e0b' }}>{activeTasks.length}</div>
+            </div>
           </div>
-          
-          {agentsLoading ? (
-            <div className="flex items-center justify-center py-6">
-              <Loader2 className="w-6 h-6 text-indigo-400 animate-spin" />
+
+          {/* Manager Agents */}
+          <div className="ops-panel p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="ops-section-header" style={{ marginBottom: 0 }}>
+                <Users size={11} /> Agents ({projectAgents.length})
+              </div>
+              <button onClick={() => setShowAssignDialog(true)} className="ops-btn">
+                <UserPlus size={11} /> Assign
+              </button>
             </div>
-          ) : projectAgents.length === 0 ? (
-            <div className="text-center py-6">
-              <Bot className="w-10 h-10 text-slate-600 mx-auto mb-2" />
-              <p className="text-slate-500">No agents assigned yet</p>
-              <p className="text-sm text-slate-600 mt-1">Assign agents to help manage this project</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {projectAgents.map((pa) => (
-                <div key={pa.id} className="flex items-center justify-between p-3 bg-slate-700/50 rounded-lg group hover:bg-slate-700 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <div className="relative">
-                      <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center">
-                        <Bot className="w-5 h-5 text-white" />
-                      </div>
-                      <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 ${getAgentStatusColor(pa.status)} rounded-full border-2 border-slate-800`} />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-slate-200">{pa.agent.name}</span>
-                        <span className="text-xs text-slate-500">@{pa.agent.handle}</span>
-                      </div>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs border ${getRoleBadgeColor(pa.role)}`}>
-                          {getRoleIcon(pa.role)}
-                          {pa.role.charAt(0).toUpperCase() + pa.role.slice(1)}
-                        </span>
-                        <span className="text-xs text-slate-500">|</span>
-                        <span className={`text-xs ${
-                          pa.status === 'active' ? 'text-green-400' : 'text-slate-400'
-                        }`}>
-                          {pa.status === 'active' ? 'Working' : pa.status}
-                        </span>
-                      </div>
-                      {pa.agent.skills && pa.agent.skills.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-1.5">
-                          {pa.agent.skills.slice(0, 3).map((skill, idx) => (
-                            <span key={idx} className="text-xs text-slate-400">{skill}{idx < Math.min(pa.agent.skills.length, 3) - 1 ? ',' : ''}</span>
-                          ))}
-                          {pa.agent.skills.length > 3 && (
-                            <span className="text-xs text-slate-500">+{pa.agent.skills.length - 3}</span>
-                          )}
+            {agentsLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 size={16} className="animate-spin" style={{ color: 'var(--amber)' }} />
+              </div>
+            ) : projectAgents.length === 0 ? (
+              <div className="text-center py-6">
+                <Bot size={24} className="mx-auto mb-2" style={{ color: 'var(--text-dim)' }} />
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-lo)' }}>No agents assigned yet</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {projectAgents.map((pa) => (
+                  <div key={pa.id} className="flex items-center justify-between p-3 group" style={{ background: 'var(--ink-3)', border: '1px solid var(--ink-4)', borderRadius: 2 }}>
+                    <div className="flex items-center gap-3">
+                      <div className="relative">
+                        <div className="w-8 h-8 rounded flex items-center justify-center" style={{ background: 'var(--ink-4)' }}>
+                          <Bot size={14} style={{ color: 'var(--amber)' }} />
                         </div>
-                      )}
+                        <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 ${getAgentStatusColor(pa.status)} rounded-full border-2`} style={{ borderColor: 'var(--ink-3)' }} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: 'var(--text-hi)' }}>{pa.agent.name}</span>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-lo)' }}>@{pa.agent.handle}</span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className={`ops-badge ${getRoleBadgeColor(pa.role).includes('yellow') ? 'ops-badge-amber' : getRoleBadgeColor(pa.role).includes('indigo') ? 'ops-badge-purple' : 'ops-badge-gray'}`} style={{ fontSize: 9 }}>
+                            {pa.role.toUpperCase()}
+                          </span>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: pa.status === 'active' ? '#10b981' : 'var(--text-lo)' }}>
+                            {pa.status}
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={() => handleMessageAgent(pa.agent_id)}
-                      className="p-2 text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-lg transition-colors"
-                      title="Send Message"
-                    >
-                      <MessageSquare className="w-4 h-4" />
-                    </button>
-                    <div className="relative">
-                      <button
-                        onClick={() => setActiveMenu(activeMenu === pa.id ? null : pa.id)}
-                        className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-700 rounded-lg transition-colors"
-                        title="More options"
-                      >
-                        <MoreVertical className="w-4 h-4" />
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => handleMessageAgent(pa.agent_id)} className="ops-btn" style={{ padding: '3px 8px' }} title="Message">
+                        <MessageSquare size={11} />
                       </button>
-                      {activeMenu === pa.id && (
-                        <>
-                          <div 
-                            className="fixed inset-0 z-10" 
-                            onClick={() => setActiveMenu(null)}
-                          />
-                          <div className="absolute right-0 top-full mt-1 w-40 bg-slate-800 rounded-lg border border-slate-700 shadow-xl z-20 py-1">
-                            {pa.role !== 'lead' && (
-                              <button
-                                onClick={() => {
-                                  handleUpdateRole(pa.agent_id, 'lead');
-                                  setActiveMenu(null);
-                                }}
-                                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-yellow-400 hover:bg-slate-700 transition-colors text-left"
-                              >
-                                <Crown className="w-4 h-4" />
-                                Make Lead
-                              </button>
-                            )}
-                            {pa.role !== 'contributor' && (
-                              <button
-                                onClick={() => {
-                                  handleUpdateRole(pa.agent_id, 'contributor');
-                                  setActiveMenu(null);
-                                }}
-                                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-indigo-400 hover:bg-slate-700 transition-colors text-left"
-                              >
-                                <Bot className="w-4 h-4" />
-                                Make Contributor
-                              </button>
-                            )}
-                            {pa.role !== 'observer' && (
-                              <button
-                                onClick={() => {
-                                  handleUpdateRole(pa.agent_id, 'observer');
-                                  setActiveMenu(null);
-                                }}
-                                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-400 hover:bg-slate-700 transition-colors text-left"
-                              >
-                                <Eye className="w-4 h-4" />
-                                Make Observer
-                              </button>
-                            )}
-                            <div className="border-t border-slate-700 my-1" />
-                            <button
-                              onClick={() => {
-                                handleRemoveAgent(pa.agent_id);
-                                setActiveMenu(null);
-                              }}
-                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors text-left"
-                            >
-                              <UserX className="w-4 h-4" />
-                              Remove
-                            </button>
-                          </div>
-                        </>
-                      )}
+                      <div className="relative">
+                        <button onClick={() => setActiveMenu(activeMenu === pa.id ? null : pa.id)} className="ops-btn" style={{ padding: '3px 8px' }}>
+                          <MoreVertical size={11} />
+                        </button>
+                        {activeMenu === pa.id && (
+                          <>
+                            <div className="fixed inset-0 z-10" onClick={() => setActiveMenu(null)} />
+                            <div className="absolute right-0 top-full mt-1 z-20 py-1" style={{ background: 'var(--ink-2)', border: '1px solid var(--ink-4)', borderRadius: 2, minWidth: 140 }}>
+                              {pa.role !== 'lead' && <button key="make-lead" onClick={() => { handleUpdateRole(pa.agent_id, 'lead'); setActiveMenu(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-left" style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#fbbf24', background: 'none', border: 'none', cursor: 'pointer' }}><Crown size={11} /> Make Lead</button>}
+                              {pa.role !== 'contributor' && <button key="make-contributor" onClick={() => { handleUpdateRole(pa.agent_id, 'contributor'); setActiveMenu(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-left" style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#a78bfa', background: 'none', border: 'none', cursor: 'pointer' }}><Bot size={11} /> Contributor</button>}
+                              {pa.role !== 'observer' && <button key="make-observer" onClick={() => { handleUpdateRole(pa.agent_id, 'observer'); setActiveMenu(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-left" style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-mid)', background: 'none', border: 'none', cursor: 'pointer' }}><Eye size={11} /> Observer</button>}
+                              <div key="divider" style={{ borderTop: '1px solid var(--ink-4)', margin: '4px 0' }} />
+                              <button key="remove" onClick={() => { handleRemoveAgent(pa.agent_id); setActiveMenu(null); }} className="w-full flex items-center gap-2 px-3 py-2 text-left" style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer' }}><UserX size={11} /> Remove</button>
+                            </div>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Recent Tasks + Costs */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <div className="ops-panel p-4">
+              <div className="ops-section-header mb-3"><Clock size={11} /> Recent Tasks</div>
+              {projectTasks.length === 0 ? (
+                <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-lo)', textAlign: 'center', padding: '16px 0' }}>No tasks yet</p>
+              ) : (
+                <div className="space-y-2">
+                  {projectTasks.slice(0, 4).map((task) => (
+                    <div key={task.id} className="flex items-center justify-between" style={{ padding: '8px 10px', background: 'var(--ink-3)', border: '1px solid var(--ink-4)', borderRadius: 2 }}>
+                      <div className="flex items-center gap-2">
+                        {task.status === 'done' ? <CheckCircle2 size={12} style={{ color: '#10b981' }} /> : <Clock size={12} style={{ color: '#f59e0b' }} />}
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-mid)' }}>{task.title}</span>
+                      </div>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: getPriorityColor(task.priority).replace('text-', '') === 'red-400' ? '#f87171' : 'var(--text-lo)', textTransform: 'uppercase' }}>{task.priority}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Resource Usage */}
-        <div className="bg-slate-800 rounded-xl border border-slate-700 p-4">
-          <h3 className="font-semibold text-slate-50 mb-4">Resource Usage</h3>
-          <div className="space-y-4">
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-slate-400 flex items-center gap-2">
-                  <Cpu className="w-4 h-4" /> CPU
-                </span>
-                <span className="text-slate-200">45%</span>
-              </div>
-              <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-                <div className="h-full bg-primary rounded-full" style={{ width: '45%' }} />
-              </div>
-            </div>
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-slate-400 flex items-center gap-2">
-                  <HardDrive className="w-4 h-4" /> RAM
-                </span>
-                <span className="text-slate-200">60%</span>
-              </div>
-              <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-                <div className="h-full bg-yellow-400 rounded-full" style={{ width: '60%' }} />
-              </div>
-            </div>
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-slate-400 flex items-center gap-2">
-                  <HardDrive className="w-4 h-4" /> Disk
-                </span>
-                <span className="text-slate-200">34%</span>
-              </div>
-              <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-                <div className="h-full bg-green-400 rounded-full" style={{ width: '34%' }} />
-              </div>
-            </div>
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-slate-400 flex items-center gap-2">
-                  <Wifi className="w-4 h-4" /> Network
-                </span>
-                <span className="text-slate-200">12 MB/s</span>
-              </div>
-              <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-                <div className="h-full bg-blue-400 rounded-full" style={{ width: '25%' }} />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Connected Resources */}
-      <div className="bg-slate-800 rounded-xl border border-slate-700 p-4">
-        <h3 className="font-semibold text-slate-50 mb-4">Connected Resources</h3>
-        <div className="flex flex-wrap gap-3">
-          <div className="flex items-center gap-2 bg-slate-700/50 px-4 py-2 rounded-lg">
-            <Github className="w-4 h-4 text-slate-300" />
-            <span className="text-slate-200">GitHub</span>
-            <CheckCircle2 className="w-4 h-4 text-green-400" />
-          </div>
-          <div className="flex items-center gap-2 bg-slate-700/50 px-4 py-2 rounded-lg">
-            <Cloud className="w-4 h-4 text-slate-300" />
-            <span className="text-slate-200">AWS</span>
-            <CheckCircle2 className="w-4 h-4 text-green-400" />
-          </div>
-          <div className="flex items-center gap-2 bg-slate-700/50 px-4 py-2 rounded-lg">
-            <CreditCard className="w-4 h-4 text-slate-300" />
-            <span className="text-slate-200">Stripe</span>
-            <CheckCircle2 className="w-4 h-4 text-green-400" />
-          </div>
-          <div className="flex items-center gap-2 bg-slate-700/50 px-4 py-2 rounded-lg">
-            <Rocket className="w-4 h-4 text-slate-300" />
-            <span className="text-slate-200">Vercel</span>
-            <CheckCircle2 className="w-4 h-4 text-green-400" />
-          </div>
-          <div className="flex items-center gap-2 bg-slate-700/50 px-4 py-2 rounded-lg">
-            <FileText className="w-4 h-4 text-slate-300" />
-            <span className="text-slate-200">Notion</span>
-            <AlertCircle className="w-4 h-4 text-red-400" />
-          </div>
-        </div>
-      </div>
-
-      {/* Active Workers & Recent Tasks */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-slate-800 rounded-xl border border-slate-700 p-4">
-          <h3 className="font-semibold text-slate-50 mb-4">Active Workers</h3>
-          {activeTasks.length === 0 ? (
-            <p className="text-slate-500 text-center py-4">No active workers</p>
-          ) : (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between p-3 bg-slate-700/50 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-primary/20 rounded-full flex items-center justify-center">
-                    <Cpu className="w-4 h-4 text-primary" />
-                  </div>
-                  <div>
-                    <p className="font-medium text-slate-200">CodeDev-1</p>
-                    <p className="text-sm text-slate-400">T-{activeTasks[0]?.id || '121'} • 45m</p>
-                  </div>
-                </div>
-                <span className="text-xs px-2 py-1 rounded-full bg-green-500/20 text-green-400">Active</span>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-slate-700/50 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-yellow-500/20 rounded-full flex items-center justify-center">
-                    <Cpu className="w-4 h-4 text-yellow-400" />
-                  </div>
-                  <div>
-                    <p className="font-medium text-slate-200">CodeReview-1</p>
-                    <p className="text-sm text-slate-400">T-{activeTasks[0]?.id || '122'} • 12m</p>
-                  </div>
-                </div>
-                <span className="text-xs px-2 py-1 rounded-full bg-green-500/20 text-green-400">Active</span>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="bg-slate-800 rounded-xl border border-slate-700 p-4">
-          <h3 className="font-semibold text-slate-50 mb-4">Recent Tasks</h3>
-          {projectTasks.length === 0 ? (
-            <p className="text-slate-500 text-center py-4">No tasks yet</p>
-          ) : (
-            <div className="space-y-3">
-              {projectTasks.slice(0, 3).map((task) => (
-                <div key={task.id} className="flex items-center justify-between p-3 bg-slate-700/50 rounded-lg">
-                  <div>
-                    <p className="font-medium text-slate-200 flex items-center gap-2">
-                      {task.status === 'done' ? (
-                        <CheckCircle2 className="w-4 h-4 text-green-400" />
-                      ) : (
-                        <Clock className="w-4 h-4 text-yellow-400" />
-                      )}
-                      {task.id}: {task.title}
-                    </p>
-                  </div>
-                  <span className={`text-xs ${getPriorityColor(task.priority)}`}>
-                    {task.priority}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Budget Overview */}
-      <div className="bg-slate-800 rounded-xl border border-slate-700 p-4">
-        <h3 className="font-semibold text-slate-50 mb-4">Budget Overview</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-slate-700/30 rounded-lg p-4">
-            <p className="text-sm text-slate-400">Today's Cost</p>
-            <p className="text-2xl font-bold text-slate-50">${project.stats?.todayCost?.toFixed(2) || '0.00'}</p>
-          </div>
-          <div className="bg-slate-700/30 rounded-lg p-4">
-            <p className="text-sm text-slate-400">This Month</p>
-            <p className="text-2xl font-bold text-slate-50">${project.stats?.monthCost || 0}</p>
-            <p className="text-xs text-slate-500">of ${project.stats?.monthBudget || 0} budget</p>
-          </div>
-          <div className="bg-slate-700/30 rounded-lg p-4">
-            <p className="text-sm text-slate-400">Budget Usage</p>
-            <div className="flex items-center gap-2">
-              <p className="text-2xl font-bold text-slate-50">
-                {Math.round(((project.stats?.monthCost || 0) / (project.stats?.monthBudget || 1)) * 100)}%
-              </p>
-              {((project.stats?.monthCost || 0) / (project.stats?.monthBudget || 1)) > 0.8 && (
-                <AlertTriangle className="w-5 h-5 text-yellow-400" />
               )}
             </div>
-            <div className="mt-2 h-2 bg-slate-700 rounded-full overflow-hidden">
-              <div 
-                className={`h-full rounded-full ${
-                  ((project.stats?.monthCost || 0) / (project.stats?.monthBudget || 1)) > 0.8 ? 'bg-yellow-400' : 'bg-green-400'
-                }`}
-                style={{ width: `${Math.min(((project.stats?.monthCost || 0) / (project.stats?.monthBudget || 1)) * 100, 100)}%` }}
-              />
+
+            <div className="ops-panel p-4">
+              <div className="ops-section-header mb-3"><AlertTriangle size={11} /> Costs</div>
+              <div className="space-y-3">
+                {[['Today', `$${project.stats?.todayCost?.toFixed(2) || '0.00'}`], ['This Month', `$${project.stats?.monthCost || 0}`]].map(([k, v]) => (
+                  <div key={k} className="flex justify-between">
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-lo)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{k}</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: 'var(--text-hi)' }}>{v}</span>
+                  </div>
+                ))}
+                <div className="ops-bar-track" style={{ marginTop: 8 }}>
+                  <div className="ops-bar-fill" style={{ width: Math.min(((project.stats?.monthCost || 0) / Math.max(project.stats?.monthBudget || 1, 1)) * 100, 100) + '%' }} />
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
 
-      {/* Assign Agent Dialog */}
-      {showAssignDialog && project && (
-        <ProjectAssignAgentDialog
-          projectName={project.name}
-          onClose={() => setShowAssignDialog(false)}
-          onAssign={handleAssignAgent}
-        />
+          {/* Assign Agent Dialog */}
+          {showAssignDialog && project && (
+            <ProjectAssignAgentDialog
+              projectName={project.name}
+              onClose={() => setShowAssignDialog(false)}
+              onAssign={handleAssignAgent}
+            />
+          )}
+        </>
       )}
-    </>
-  )}
 
   {/* Tasks Tab */}
   {activeTab === 'tasks' && project && (

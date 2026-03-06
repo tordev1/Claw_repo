@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { projectsApi, machinesApi } from '../services/api';
-import { Cpu, FolderKanban, CheckSquare, DollarSign, ArrowRight, Zap, Loader2, AlertCircle, Server, WifiOff } from 'lucide-react';
+import { projectsApi, machinesApi, agentsApi } from '../services/api';
+import { Bot, FolderKanban, CheckSquare, DollarSign, ArrowRight, Zap, Loader2, AlertCircle, Server, WifiOff, Trash2, Cpu } from 'lucide-react';
 
 function timeAgo(ts: string) {
   if (!ts) return 'Never';
@@ -25,20 +25,27 @@ function machineStatus(m: any) {
 export default function Dashboard() {
   const [projects, setProjects] = useState<any[]>([]);
   const [machines, setMachines] = useState<any[]>([]);
-  const [stats, setStats] = useState({ macMinis: 0, activeProjects: 0, totalTasks: 0, monthlyCost: 0, monthlyBudget: 275 });
+  const [stats, setStats] = useState({ totalAgents: 0, activeProjects: 0, totalTasks: 0, monthlyCost: 0, monthlyBudget: 275 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const deleteMachine = async (id: string) => {
+    if (!confirm('Delete this machine?')) return;
+    await machinesApi.delete(id);
+    setMachines(prev => prev.filter(m => m.id !== id));
+  };
 
   const load = async () => {
     try {
       setLoading(true); setError(null);
-      const [pd, md] = await Promise.allSettled([projectsApi.list(), machinesApi.list()]);
+      const [pd, md, ad] = await Promise.allSettled([projectsApi.list(), machinesApi.list(), agentsApi.list()]);
       const pList = pd.status === 'fulfilled' ? (pd.value.projects || []) : [];
       const mList = md.status === 'fulfilled' ? (md.value.machines || []) : [];
+      const aList = ad.status === 'fulfilled' ? (ad.value.agents || ad.value || []) : [];
       setProjects(pList); setMachines(mList);
       let monthlyCost = 0;
       try { const { costsApi } = await import('../services/api'); const c = await costsApi.getSummary(); monthlyCost = c?.total || 0; } catch {}
-      setStats({ macMinis: mList.length, activeProjects: pList.filter((p: any) => p.status === 'active').length, totalTasks: pList.reduce((s: number, p: any) => s + (p.stats?.activeTasks || 0), 0), monthlyCost, monthlyBudget: 275 });
+      setStats({ totalAgents: aList.length, activeProjects: pList.filter((p: any) => p.status === 'active').length, totalTasks: pList.reduce((s: number, p: any) => s + (p.stats?.activeTasks || 0), 0), monthlyCost, monthlyBudget: 275 });
     } catch (e: any) { setError(e.message); } finally { setLoading(false); }
   };
 
@@ -65,7 +72,7 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="ops-stat"><div className="flex items-center justify-between mb-3"><span className="ops-label">Mac Minis</span><Cpu size={13} style={{ color: 'var(--amber)' }} /></div><div className="ops-value">{stats.macMinis}</div></div>
+        <div className="ops-stat"><div className="flex items-center justify-between mb-3"><span className="ops-label">Agents</span><Bot size={13} style={{ color: 'var(--amber)' }} /></div><div className="ops-value">{stats.totalAgents}</div></div>
         <div className="ops-stat"><div className="flex items-center justify-between mb-3"><span className="ops-label">Active Projects</span><FolderKanban size={13} style={{ color: '#10b981' }} /></div><div className="ops-value" style={{ color: '#10b981' }}>{stats.activeProjects}</div></div>
         <div className="ops-stat"><div className="flex items-center justify-between mb-3"><span className="ops-label">Active Tasks</span><CheckSquare size={13} style={{ color: '#f59e0b' }} /></div><div className="ops-value" style={{ color: '#f59e0b' }}>{stats.totalTasks}</div></div>
         <div className="ops-stat">
@@ -88,7 +95,12 @@ export default function Dashboard() {
                 <div key={m.id} className="ops-panel p-4">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2"><span className={"ops-dot " + st.dot} /><span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600 }}>{m.hostname}</span></div>
-                    <span className={"ops-badge " + st.cls}>{st.label}</span>
+                    <div className="flex items-center gap-2">
+                      <span className={"ops-badge " + st.cls}>{st.label}</span>
+                      <button onClick={() => deleteMachine(m.id)} title="Delete machine" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 2 }} onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')} onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}>
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
                   </div>
                   <div className="space-y-1.5">
                     {m.ip_address && <div className="flex justify-between"><span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-lo)', textTransform: 'uppercase' }}>IP</span><span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-mid)' }}>{m.ip_address}</span></div>}
