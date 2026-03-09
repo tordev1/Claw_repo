@@ -89,49 +89,65 @@ function prompt(question, secret = false) {
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 function wsConnect(agentId, userToken, onMsg) {
-    const u = new URL(`${WS_BASE}/ws?token=${encodeURIComponent(userToken)}`);
-    const lib = u.protocol === 'wss:' ? tls : net;
-    const port = parseInt(u.port) || (u.protocol === 'wss:' ? 443 : 80);
+    const u = new URL(`${BASE}/ws?token=${encodeURIComponent(userToken)}`);
+    const lib = u.protocol === 'https:' ? https : http;
+    const port = parseInt(u.port) || (u.protocol === 'https:' ? 443 : 80);
     const key = Buffer.from(Array.from({length: 16}, () => Math.floor(Math.random() * 256))).toString('base64');
 
-    const sock = lib.connect({ host: u.hostname, port }, () => {
-        sock.write(
-            `GET ${u.pathname}${u.search} HTTP/1.1\r\nHost: ${u.hostname}:${port}\r\n` +
-            `Upgrade: websocket\r\nConnection: Upgrade\r\n` +
-            `Sec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`
-        );
+    const httpReq = lib.request({
+        hostname: u.hostname,
+        port,
+        path: u.pathname + u.search,
+        headers: {
+            Connection: 'Upgrade',
+            Upgrade: 'websocket',
+            'Sec-WebSocket-Key': key,
+            'Sec-WebSocket-Version': '13',
+        }
     });
+    httpReq.end();
 
-    let upgraded = false, buf = Buffer.alloc(0);
+    httpReq.on('upgrade', (res, sock, head) => {
+        log('WS', 'Connected ✓', C.G);
+        let buf = head && head.length ? head : Buffer.alloc(0);
 
-    sock.on('data', chunk => {
-        if (!upgraded) {
-            if (chunk.toString().includes('101')) {
-                upgraded = true;
-                log('WS', 'Connected ✓', C.G);
+        sock.on('data', chunk => {
+            buf = Buffer.concat([buf, chunk]);
+            while (buf.length >= 2) {
+                const opcode = buf[0] & 0x0f;
+                let len = buf[1] & 0x7f, off = 2;
+                if (len === 126) { len = buf.readUInt16BE(2); off = 4; }
+                if (buf.length < off + len) break;
+                const payload = buf.slice(off, off + len);
+                buf = buf.slice(off + len);
+                if (opcode === 1) { try { onMsg(JSON.parse(payload.toString())); } catch { } }
+                if (opcode === 9) wsSend(sock, '', 10);
             }
-            return;
-        }
-        buf = Buffer.concat([buf, chunk]);
-        while (buf.length >= 2) {
-            const opcode = buf[0] & 0x0f;
-            let len = buf[1] & 0x7f, off = 2;
-            if (len === 126) { len = buf.readUInt16BE(2); off = 4; }
-            if (buf.length < off + len) break;
-            const payload = buf.slice(off, off + len);
-            buf = buf.slice(off + len);
-            if (opcode === 1) { try { onMsg(JSON.parse(payload.toString())); } catch { } }
-            if (opcode === 9) wsSend(sock, '', 10);
-        }
+        });
+
+        sock.on('error', e => log('WS', e.message, C.R));
+
+        const keepalive = setInterval(() => { if (sock.writable) wsSend(sock, '', 9); }, 25000);
+
+        sock.on('close', () => {
+            clearInterval(keepalive);
+            log('WS', 'Disconnected — reconnecting in 5s...', C.Y);
+            setTimeout(() => wsConnect(agentId, userToken, onMsg), 5000);
+        });
     });
 
-    sock.on('error', e => log('WS', e.message, C.R));
+    httpReq.on('response', res => {
+        let body = '';
+        res.on('data', d => body += d);
+        res.on('end', () => {
+            log('WS', `Upgrade rejected: HTTP ${res.statusCode} — ${body.substring(0, 150)}`, C.R);
+        });
+        res.resume();
+        setTimeout(() => wsConnect(agentId, userToken, onMsg), 5000);
+    });
 
-    const keepalive = setInterval(() => { if (sock.writable) wsSend(sock, '', 9); }, 25000);
-
-    sock.on('close', () => {
-        clearInterval(keepalive);
-        log('WS', 'Disconnected — reconnecting in 5s...', C.Y);
+    httpReq.on('error', e => {
+        log('WS', e.message, C.R);
         setTimeout(() => wsConnect(agentId, userToken, onMsg), 5000);
     });
 }
@@ -146,6 +162,25 @@ function wsSend(sock, data, opcode = 1) {
         ? Buffer.from([0x80 | opcode, 0x80 | p.length])
         : Buffer.from([0x80 | opcode, 0x80 | 126, p.length >> 8, p.length & 0xff]);
     sock.write(Buffer.concat([header, mask, masked]));
+}
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
+async function sendMessage(channelId, content, userToken, agentId) {
+    try {
+        const body = { content };
+        if (agentId) body.agent_id = agentId;
+        const r = await req('POST', `/api/channels/${channelId}/messages`, body, userToken);
+        if (r.status !== 200 && r.status !== 201) {
+            log('CHAT', `Send failed (${r.status}): ${JSON.stringify(r.body)}`, C.R);
+        }
+    } catch (e) { log('CHAT', `Send error: ${e.message}`, C.R); }
+}
+
+function isMentioned(content) {
+    if (!content) return false;
+    const lower = content.toLowerCase();
+    return lower.includes(`@${AGENT_HANDLE.toLowerCase()}`) ||
+           lower.includes(`@${AGENT_NAME.toLowerCase()}`);
 }
 
 // ── Task handling ─────────────────────────────────────────────────────────────
@@ -172,13 +207,18 @@ async function handleTask(data, agentId, userToken) {
 }
 
 // ── Notification poll ─────────────────────────────────────────────────────────
+const seenNotifications = new Set();
+
 async function pollNotifications(agentId, userToken) {
     try {
         const r = await req('GET', `/api/agents/${agentId}/notifications`, null, userToken);
         if (r.status === 200) {
             for (const n of (r.body.notifications || []).filter(n => !n.is_read)) {
+                if (seenNotifications.has(n.id)) continue;
+                seenNotifications.add(n.id);
                 log('NOTIF', `🔔 ${n.title}: ${n.content}`, C.Y);
-                await req('POST', `/api/agents/${agentId}/notifications/${n.id}/read`, {}, userToken);
+                const res = await req('POST', `/api/agents/${agentId}/notifications/${n.id}/read`, {}, userToken);
+                if (res.status !== 200) log('NOTIF', `Mark-read failed (${res.status})`, C.R);
             }
         }
     } catch { }
@@ -234,6 +274,8 @@ async function main() {
 
     // ── Step 4: WebSocket ──────────────────────────────────────────────────────
     const activeTasks = new Set();
+    const repliedMessages = new Set();       // dedupe by message ID
+    const channelCooldown = new Map();       // channel → last-reply timestamp
 
     wsConnect(agentId, userToken, async msg => {
         const ev = msg.event || msg.type;
@@ -253,9 +295,46 @@ async function main() {
         }
 
         if (ev === 'chat:message' || ev === 'message:new') {
-            const isMine = data?.sender_id === agentId;
-            if (!isMine && data?.content) {
-                log('MSG', `💬 ${data?.sender_name || '?'}: ${data.content}`, C.C);
+            const isMine = data?.sender_id === agentId || data?.sender_type === 'agent' && data?.sender_id === agentId;
+            const msgId = data?.id || data?.message_id;
+
+            // Skip own messages and already-handled messages
+            if (isMine || (msgId && repliedMessages.has(msgId))) return;
+
+            if (data?.content) {
+                const sender = data?.sender_name || '?';
+                const channelId = data?.channel_id;
+                log('MSG', `💬 [#${data?.channel_name || channelId}] ${sender}: ${data.content}`, C.C);
+
+                // Track message IDs to prevent duplicate processing
+                if (msgId) repliedMessages.add(msgId);
+                if (repliedMessages.size > 500) repliedMessages.clear();
+            }
+        }
+
+        if (ev === 'agent:rejected') {
+            if (!data?.id || data?.id === agentId) {
+                log('INIT', `❌ Registration rejected: ${data?.reason || 'No reason given'}`, C.R);
+                process.exit(1);
+            }
+        }
+
+        if (ev === 'project:created') {
+            const name = data?.name || data?.project_name || data?.id;
+            log('PROJECT', `🆕 New project created: "${name}"`, C.C);
+        }
+
+        if (ev === 'agent:assigned_to_project' || ev === 'agent:project_assigned') {
+            if (data?.agent_id === agentId) {
+                const projectName = data?.project_name || data?.project_id;
+                log('PROJECT', `✅ Assigned to project: "${projectName}"`, C.G);
+            }
+        }
+
+        if (ev === 'agent:removed_from_project' || ev === 'agent:project_removed') {
+            if (data?.agent_id === agentId) {
+                const projectName = data?.project_name || data?.project_id;
+                log('PROJECT', `⚠ Removed from project: "${projectName}"`, C.Y);
             }
         }
     });

@@ -71,8 +71,8 @@ class SQLiteAdapter {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS tasks (
         id TEXT PRIMARY KEY,
-        project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
-        agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        agent_id TEXT REFERENCES manager_agents(id) ON DELETE SET NULL,
         title TEXT NOT NULL,
         description TEXT,
         status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),
@@ -171,7 +171,7 @@ class SQLiteAdapter {
       CREATE TABLE IF NOT EXISTS messages (
         id TEXT PRIMARY KEY,
         user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-        agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+        agent_id TEXT REFERENCES manager_agents(id) ON DELETE SET NULL,
         content TEXT NOT NULL,
         channel TEXT NOT NULL DEFAULT 'general',
         message_type TEXT DEFAULT 'text' CHECK (message_type IN ('text', 'image', 'file', 'system', 'agent_response')),
@@ -198,7 +198,7 @@ class SQLiteAdapter {
       CREATE TABLE IF NOT EXISTS dm_channels (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+        agent_id TEXT NOT NULL REFERENCES manager_agents(id) ON DELETE CASCADE,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now')),
         UNIQUE(user_id, agent_id)
@@ -333,7 +333,7 @@ class SQLiteAdapter {
         id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
         channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
         user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
-        agent_id TEXT REFERENCES agents(id) ON DELETE CASCADE,
+        agent_id TEXT REFERENCES manager_agents(id) ON DELETE CASCADE,
         last_read_at DATETIME,
         joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(channel_id, user_id),
@@ -365,7 +365,7 @@ class SQLiteAdapter {
         id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
         channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
         user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
-        agent_id TEXT REFERENCES agents(id) ON DELETE CASCADE,
+        agent_id TEXT REFERENCES manager_agents(id) ON DELETE CASCADE,
         started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         expires_at DATETIME
       );
@@ -648,7 +648,167 @@ class SQLiteAdapter {
       CREATE INDEX IF NOT EXISTS idx_task_history_agent ON task_assignment_history(agent_id);
     `);
 
+    // ========== ACTIVITY HISTORY TABLE ==========
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS activity_history (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        event_type TEXT NOT NULL CHECK (event_type IN ('task', 'agent', 'project', 'system')),
+        action TEXT NOT NULL,
+        entity_id TEXT,
+        entity_title TEXT,
+        project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+        project_name TEXT,
+        agent_id TEXT,
+        agent_name TEXT,
+        user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+        metadata TEXT DEFAULT '{}',
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+    `);
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_activity_history_type ON activity_history(event_type);
+      CREATE INDEX IF NOT EXISTS idx_activity_history_created ON activity_history(created_at);
+      CREATE INDEX IF NOT EXISTS idx_activity_history_project ON activity_history(project_id);
+      CREATE INDEX IF NOT EXISTS idx_activity_history_agent ON activity_history(agent_id);
+    `);
+
+    // ========== SCHEMA MIGRATIONS FOR EXISTING INSTALLS ==========
+    // Fix tasks.agent_id to reference manager_agents instead of legacy agents
+    this._migrateTableFK('tasks', 'REFERENCES agents(id)', `
+      CREATE TABLE tasks_new (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        agent_id TEXT REFERENCES manager_agents(id) ON DELETE SET NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),
+        priority INTEGER DEFAULT 1 CHECK (priority BETWEEN 1 AND 5),
+        payload TEXT DEFAULT '{}',
+        result TEXT,
+        started_at TEXT,
+        completed_at TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        assigned_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+        assigned_at TEXT,
+        accepted_at TEXT,
+        due_date TEXT,
+        estimated_hours INTEGER,
+        tags TEXT DEFAULT '[]',
+        parent_task_id TEXT REFERENCES tasks_new(id) ON DELETE SET NULL
+      )
+    `, `
+      CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
+      CREATE INDEX IF NOT EXISTS idx_tasks_agent ON tasks(agent_id);
+      CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+      CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at);
+      CREATE INDEX IF NOT EXISTS idx_tasks_assigned_agent ON tasks(agent_id, status);
+      CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date);
+      CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id);
+      CREATE INDEX IF NOT EXISTS idx_tasks_assigned_by ON tasks(assigned_by);
+    `);
+
+    // Fix messages.agent_id to reference manager_agents
+    this._migrateTableFK('messages', 'agent_id TEXT REFERENCES agents(id)', `
+      CREATE TABLE messages_new (
+        id TEXT PRIMARY KEY,
+        user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+        agent_id TEXT REFERENCES manager_agents(id) ON DELETE SET NULL,
+        content TEXT NOT NULL,
+        channel TEXT NOT NULL DEFAULT 'general',
+        channel_id TEXT REFERENCES channels(id) ON DELETE CASCADE,
+        message_type TEXT DEFAULT 'text' CHECK (message_type IN ('text', 'image', 'file', 'system', 'agent_response')),
+        metadata TEXT DEFAULT '{}',
+        is_dm INTEGER DEFAULT 0,
+        dm_channel_id TEXT,
+        parent_message_id TEXT REFERENCES messages_new(id) ON DELETE SET NULL,
+        edited_at TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      )
+    `, `
+      CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id);
+      CREATE INDEX IF NOT EXISTS idx_messages_agent ON messages(agent_id);
+      CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel);
+      CREATE INDEX IF NOT EXISTS idx_messages_channel_id ON messages(channel_id);
+      CREATE INDEX IF NOT EXISTS idx_messages_dm ON messages(is_dm, dm_channel_id);
+      CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+      CREATE INDEX IF NOT EXISTS idx_messages_channel_created ON messages(channel, created_at);
+    `);
+
+    // Fix channel_members.agent_id to reference manager_agents
+    this._migrateTableFK('channel_members', 'agent_id TEXT REFERENCES agents(id)', `
+      CREATE TABLE channel_members_new (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+        user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+        agent_id TEXT REFERENCES manager_agents(id) ON DELETE CASCADE,
+        last_read_at DATETIME,
+        joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(channel_id, user_id),
+        UNIQUE(channel_id, agent_id)
+      )
+    `, `
+      CREATE INDEX IF NOT EXISTS idx_channel_members_channel ON channel_members(channel_id);
+      CREATE INDEX IF NOT EXISTS idx_channel_members_user ON channel_members(user_id);
+      CREATE INDEX IF NOT EXISTS idx_channel_members_agent ON channel_members(agent_id);
+    `);
+
+    // Fix typing_indicators.agent_id to reference manager_agents
+    this._migrateTableFK('typing_indicators', 'agent_id TEXT REFERENCES agents(id)', `
+      CREATE TABLE typing_indicators_new (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+        user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+        agent_id TEXT REFERENCES manager_agents(id) ON DELETE CASCADE,
+        started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        expires_at DATETIME
+      )
+    `, `
+      CREATE INDEX IF NOT EXISTS idx_typing_channel ON typing_indicators(channel_id);
+      CREATE INDEX IF NOT EXISTS idx_typing_expires ON typing_indicators(expires_at);
+    `);
+
+    // Fix dm_channels.agent_id to reference manager_agents
+    this._migrateTableFK('dm_channels', 'agent_id TEXT NOT NULL REFERENCES agents(id)', `
+      CREATE TABLE dm_channels_new (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        agent_id TEXT NOT NULL REFERENCES manager_agents(id) ON DELETE CASCADE,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(user_id, agent_id)
+      )
+    `, `
+      CREATE INDEX IF NOT EXISTS idx_dm_channels_user ON dm_channels(user_id);
+      CREATE INDEX IF NOT EXISTS idx_dm_channels_agent ON dm_channels(agent_id);
+    `);
+
     console.log('✅ Phase 3: Task Assignment schema initialized');
+  }
+
+  // Helper: recreate a table when its SQL contains a wrong FK string
+  _migrateTableFK(tableName, wrongFKFragment, newTableSQL, indexSQL) {
+    try {
+      const row = this.db.prepare(
+        `SELECT sql FROM sqlite_master WHERE type='table' AND name=?`
+      ).get(tableName);
+      if (!row?.sql?.includes(wrongFKFragment)) return; // already correct
+
+      console.log(`🔧 Migrating ${tableName} — fixing agent FK to manager_agents...`);
+      const newName = `${tableName}_new`;
+      const migrate = this.db.transaction(() => {
+        this.db.exec(newTableSQL);
+        // Copy all rows; columns must match (extra cols in new table get NULLs)
+        this.db.prepare(`INSERT OR IGNORE INTO ${newName} SELECT * FROM ${tableName}`).run();
+        this.db.exec(`DROP TABLE ${tableName}`);
+        this.db.exec(`ALTER TABLE ${newName} RENAME TO ${tableName}`);
+        if (indexSQL) this.db.exec(indexSQL);
+      });
+      migrate();
+      console.log(`✅ ${tableName} migrated`);
+    } catch (err) {
+      console.warn(`${tableName} migration skipped:`, err.message);
+    }
   }
 
   prepare(sql) {
@@ -816,10 +976,10 @@ class SQLiteAdapter {
   getTypingIndicators(channelId) {
     const now = new Date().toISOString();
     return this.db.prepare(`
-      SELECT ti.*, u.name as user_name, a.name as agent_name
+      SELECT ti.*, u.name as user_name, ma.name as agent_name
       FROM typing_indicators ti
       LEFT JOIN users u ON ti.user_id = u.id
-      LEFT JOIN agents a ON ti.agent_id = a.id
+      LEFT JOIN manager_agents ma ON ti.agent_id = ma.id
       WHERE ti.channel_id = ? AND ti.expires_at > ?
     `).all(channelId, now);
   }

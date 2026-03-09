@@ -159,7 +159,10 @@ async function createProject(request, reply) {
     VALUES (?, ?, ?, ?, ?)
   `).run(id, name, description || null, owner_id, JSON.stringify(config));
 
+  const now = new Date().toISOString();
+
   // Auto-create project channel
+  let channelId;
   try {
     const { createChannel } = require('./chat');
     const channel = await createChannel({
@@ -168,39 +171,42 @@ async function createProject(request, reply) {
       projectId: id,
       createdBy: owner_id
     });
-
-    // Send notification to admin via DM if admin is not the owner
-    if (owner_id !== 'system') {
-      const admin = db.prepare("SELECT id FROM users WHERE role = 'admin' LIMIT 1").get();
-      if (admin && admin.id !== owner_id) {
-        const { getOrCreateDMChannel, sendChannelMessage } = require('./chat');
-        const dmChannel = await getOrCreateDMChannel(admin.id, owner_id);
-        await sendChannelMessage(admin.id, dmChannel.id, `New project "${name}" has been created.`);
-      }
-    }
-
-    reply.code(201);
-    return {
-      id,
-      name,
-      description,
-      status: 'active',
-      owner_id,
-      channel_id: channel.id,
-      created_at: new Date().toISOString()
-    };
+    channelId = channel.id;
   } catch (err) {
     console.error('Error creating project channel:', err);
-    reply.code(201);
-    return {
-      id,
-      name,
-      description,
-      status: 'active',
-      owner_id,
-      created_at: new Date().toISOString()
-    };
   }
+
+  // Emit project:created WS event (global broadcast)
+  wsManager.broadcast('project:created', {
+    project_id: id,
+    name,
+    description,
+    status: 'active',
+    owner_id,
+    channel_id: channelId || null,
+    created_at: now
+  }, {});
+
+  // Record in activity history
+  try {
+    db.prepare(`
+      INSERT INTO activity_history (event_type, action, entity_id, entity_title, project_id, project_name, user_id, created_at)
+      VALUES ('project', 'created', ?, ?, ?, ?, ?, ?)
+    `).run(id, name, id, name, owner_id, now);
+  } catch (e) { /* activity_history may not exist on very old DBs */ }
+
+  // Global broadcast above already reaches all connected clients (agents + admin)
+
+  reply.code(201);
+  return {
+    id,
+    name,
+    description,
+    status: 'active',
+    owner_id,
+    channel_id: channelId || null,
+    created_at: now
+  };
 }
 
 // PATCH /api/projects/:id/status - Update project status
@@ -209,7 +215,7 @@ async function updateProjectStatus(request, reply) {
   const { id } = request.params;
   const { status } = request.body;
 
-  const project = db.prepare('SELECT status FROM projects WHERE id = ?').get(id);
+  const project = db.prepare('SELECT status, name FROM projects WHERE id = ?').get(id);
   if (!project) {
     reply.code(404);
     return { error: 'Project not found' };
@@ -221,7 +227,7 @@ async function updateProjectStatus(request, reply) {
   db.prepare('UPDATE projects SET status = ?, updated_at = ? WHERE id = ?')
     .run(status, now, id);
 
-  wsManager.emitProjectStatusChanged(id, oldStatus, status);
+  wsManager.emitProjectStatusChanged(id, oldStatus, status, project.name);
 
   return { id, old_status: oldStatus, new_status: status, updated_at: now };
 }
@@ -731,11 +737,32 @@ async function assignTask(request, reply) {
 
   wsManager.emitTaskAssigned(task.project_id, {
     task_id: id,
+    task_title: task.title,
     agent_id,
+    agent_name: db.prepare('SELECT name FROM manager_agents WHERE id = ?').get(agent_id)?.name,
+    project_name: task.project_name,
     previous_agent_id: previousAgentId,
     assigned_by: userId,
     dm_channel_id: dmChannelId
   });
+
+  // Persist notification to agent_notifications table
+  notifyTaskAssigned(
+    { id, title: task.title, project_id: task.project_id },
+    { id: task.project_id, name: task.project_name },
+    agent_id,
+    userId
+  ).catch(e => console.error('notifyTaskAssigned error:', e));
+
+  // Record in activity history
+  try {
+    db.prepare(`
+      INSERT INTO activity_history (event_type, action, entity_id, entity_title, project_id, project_name, agent_id, agent_name, user_id, created_at)
+      VALUES ('task', 'assigned', ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, task.title, task.project_id, task.project_name, agent_id,
+      db.prepare('SELECT name FROM manager_agents WHERE id = ?').get(agent_id)?.name,
+      userId, now);
+  } catch (e) { /* ignore */ }
 
   return {
     id,
@@ -785,9 +812,24 @@ async function acceptTask(request, reply) {
 
   wsManager.emitTaskAccepted(task.project_id, {
     task_id: id,
+    task_title: task.title,
+    project_name: task.project_name,
     agent_id: userId,
     accepted_at: now
   });
+
+  notifyTaskAccepted(
+    { id, title: task.title, project_id: task.project_id, assigned_by: task.assigned_by },
+    { id: task.project_id, name: task.project_name },
+    userId
+  ).catch(e => console.error('notifyTaskAccepted error:', e));
+
+  try {
+    db.prepare(`
+      INSERT INTO activity_history (event_type, action, entity_id, entity_title, project_id, project_name, agent_id, created_at)
+      VALUES ('task', 'accepted', ?, ?, ?, ?, ?, ?)
+    `).run(id, task.title, task.project_id, task.project_name, userId, now);
+  } catch (e) { /* ignore */ }
 
   return {
     id,
@@ -859,10 +901,26 @@ async function rejectTask(request, reply) {
 
   wsManager.emitTaskRejected(task.project_id, {
     task_id: id,
+    task_title: task.title,
+    project_name: task.project_name,
     agent_id: userId,
     reason,
     rejected_at: now
   });
+
+  notifyTaskRejected(
+    { id, title: task.title, project_id: task.project_id, assigned_by: task.assigned_by },
+    { id: task.project_id, name: task.project_name },
+    userId,
+    reason
+  ).catch(e => console.error('notifyTaskRejected error:', e));
+
+  try {
+    db.prepare(`
+      INSERT INTO activity_history (event_type, action, entity_id, entity_title, project_id, project_name, agent_id, created_at)
+      VALUES ('task', 'rejected', ?, ?, ?, ?, ?, ?)
+    `).run(id, task.title, task.project_id, task.project_name, userId, now);
+  } catch (e) { /* ignore */ }
 
   return {
     id,
@@ -921,7 +979,10 @@ async function startTask(request, reply) {
 
   wsManager.emitTaskStarted(task.project_id, {
     task_id: id,
+    task_title: task.title,
+    project_name: task.project_name,
     agent_id: userId,
+    agent_name: db.prepare('SELECT name FROM manager_agents WHERE id = ?').get(userId)?.name,
     started_at: now,
     comment
   });
@@ -982,11 +1043,29 @@ async function completeTask(request, reply) {
 
   wsManager.emitTaskCompleted(task.project_id, {
     task_id: id,
+    task_title: task.title,
+    project_name: task.project_name,
     agent_id: userId,
+    agent_name: db.prepare('SELECT name FROM manager_agents WHERE id = ?').get(userId)?.name,
     completed_at: now,
     result,
     comment
   });
+
+  notifyTaskCompleted(
+    { id, title: task.title, project_id: task.project_id, assigned_by: task.assigned_by },
+    { id: task.project_id, name: task.project_name },
+    userId,
+    result
+  ).catch(e => console.error('notifyTaskCompleted error:', e));
+
+  try {
+    db.prepare(`
+      INSERT INTO activity_history (event_type, action, entity_id, entity_title, project_id, project_name, agent_id, agent_name, created_at)
+      VALUES ('task', 'completed', ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, task.title, task.project_id, task.project_name, userId,
+      db.prepare('SELECT name FROM manager_agents WHERE id = ?').get(userId)?.name, now);
+  } catch (e) { /* ignore */ }
 
   return {
     id,
@@ -1696,11 +1775,22 @@ async function sendChannelMessageRoute(request, reply) {
     return { error: 'Authentication required' };
   }
 
-  const { content, metadata = {} } = request.body;
+  const { content, metadata = {}, agent_id } = request.body;
 
   if (!content || !content.trim()) {
     reply.code(400);
     return { error: 'Content is required' };
+  }
+
+  // Validate agent_id if provided
+  let agentId = null;
+  if (agent_id) {
+    const agent = db.prepare('SELECT id FROM manager_agents WHERE id = ?').get(agent_id);
+    if (!agent) {
+      reply.code(400);
+      return { error: 'Invalid agent_id' };
+    }
+    agentId = agent_id;
   }
 
   // Get channel
@@ -1712,7 +1802,7 @@ async function sendChannelMessageRoute(request, reply) {
   }
 
   // Check membership - allow general channels, DM participants, and channel members
-  if (request.user?.role !== 'admin') {
+  if (request.user?.role !== 'admin' && !agentId) {
     const isParticipant =
       channel.type === 'general' ||
       channel.created_by === userId ||
@@ -1729,7 +1819,8 @@ async function sendChannelMessageRoute(request, reply) {
 
   const { sendChannelMessage } = require('./chat');
   const message = await sendChannelMessage(userId, channel.id, content, {
-    metadata: { ...metadata, channel_name: channel.name }
+    metadata: { ...metadata, channel_name: channel.name },
+    agentId,
   });
 
   reply.code(201);
@@ -2629,6 +2720,18 @@ async function assignAgentToProjectRouteV2(request, reply) {
       console.error('Error sending assignment DM:', dmErr);
     }
 
+    // Persist notification in agent_notifications table
+    notifyAgentProjectAssigned(agent_id, project, role, user.id)
+      .catch(e => console.error('notifyAgentProjectAssigned error:', e));
+
+    // Record in activity history
+    try {
+      db.prepare(`
+        INSERT INTO activity_history (event_type, action, entity_id, entity_title, project_id, project_name, agent_id, agent_name, user_id, created_at)
+        VALUES ('agent', 'assigned_to_project', ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(agent_id, agent.name, id, project.name, agent_id, agent.name, user.id, now);
+    } catch (e) { /* ignore */ }
+
     reply.code(201);
     return {
       assignment_id: assignmentId,
@@ -3057,6 +3160,11 @@ async function registerManagerAgentRoute(request, reply) {
   // Auto-create a session token so the agent can operate without admin credentials
   const session = await createSession('user-scorpion-001');
 
+  // Notify admin in real-time that a new agent is waiting for approval
+  wsManager.emitAgentRegistered({ id, name, handle: normalizedHandle, role, created_at: now });
+  const { notifyNewAgentRegistration } = require('./notifications');
+  notifyNewAgentRegistration(id, 'user-scorpion-001').catch(e => console.error('notifyNewAgentRegistration:', e));
+
   reply.code(201);
   return {
     id,
@@ -3160,6 +3268,8 @@ async function approveManagerAgentRoute(request, reply) {
     console.error('Error creating agent DM channel:', dmErr);
   }
 
+  wsManager.emitAgentApproved({ id, name: agent.name, handle: agent.handle }, user.id);
+
   return {
     id,
     name: agent.name,
@@ -3201,6 +3311,8 @@ async function rejectManagerAgentRoute(request, reply) {
     INSERT INTO agent_notifications (id, agent_id, type, title, content, data, created_at)
     VALUES (?, ?, 'rejected', 'Registration Not Approved', ?, ?, ?)
   `).run(generateId(), id, reason || 'Your registration was not approved by an administrator.', JSON.stringify({ rejected_by: user.id, reason }), now);
+
+  wsManager.emitAgentRejected({ id, name: agent.name, handle: agent.handle }, user.id, reason);
 
   return {
     id,
@@ -3298,8 +3410,8 @@ async function getAgentNotificationsRoute(request, reply) {
   };
 }
 
-// POST /api/agents/:id/notifications/:notificationId/read - Mark notification as read
-async function markNotificationReadRoute(request, reply) {
+// POST /api/agents/:id/notifications/:notificationId/read - Mark agent notification as read
+async function markAgentNotificationReadRoute(request, reply) {
   const db = getDb();
   const { id, notificationId } = request.params;
   const user = request.user;
@@ -3319,7 +3431,7 @@ async function markNotificationReadRoute(request, reply) {
     return { error: 'Notification not found' };
   }
 
-  db.prepare('UPDATE agent_notifications SET is_read = TRUE WHERE id = ?').run(notificationId);
+  db.prepare('UPDATE agent_notifications SET is_read = 1 WHERE id = ?').run(notificationId);
 
   return { success: true, notification_id: notificationId };
 }
@@ -3966,6 +4078,71 @@ async function listUsersRoute(request, reply) {
   }
 }
 
+// ============================================================================
+// ACTIVITY HISTORY ROUTE
+// ============================================================================
+
+// GET /api/activity - Get activity history feed
+async function getActivityRoute(request, reply) {
+  try {
+    const db = getDb();
+    const { type, project_id, agent_id, limit = 50, offset = 0 } = request.query;
+
+    let sql = `
+      SELECT ah.*,
+        p.name as project_name_resolved,
+        ma.name as agent_name_resolved
+      FROM activity_history ah
+      LEFT JOIN projects p ON ah.project_id = p.id
+      LEFT JOIN manager_agents ma ON ah.agent_id = ma.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (type) {
+      sql += ' AND ah.event_type = ?';
+      params.push(type);
+    }
+    if (project_id) {
+      sql += ' AND ah.project_id = ?';
+      params.push(project_id);
+    }
+    if (agent_id) {
+      sql += ' AND ah.agent_id = ?';
+      params.push(agent_id);
+    }
+
+    sql += ' ORDER BY ah.created_at DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), parseInt(offset));
+
+    const activities = db.prepare(sql).all(...params);
+
+    const countSql = `SELECT COUNT(*) as total FROM activity_history ah WHERE 1=1${
+      type ? ' AND ah.event_type = ?' : ''
+    }${project_id ? ' AND ah.project_id = ?' : ''}${agent_id ? ' AND ah.agent_id = ?' : ''}`;
+    const countParams = [];
+    if (type) countParams.push(type);
+    if (project_id) countParams.push(project_id);
+    if (agent_id) countParams.push(agent_id);
+    const { total } = db.prepare(countSql).get(...countParams);
+
+    return {
+      activities: activities.map(a => ({
+        ...a,
+        project_name: a.project_name || a.project_name_resolved,
+        agent_name: a.agent_name || a.agent_name_resolved,
+        metadata: a.metadata ? JSON.parse(a.metadata) : null,
+      })),
+      total,
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+    };
+  } catch (err) {
+    reply.code(500);
+    return { error: err.message };
+  }
+}
+
 module.exports = {
   // Projects
   listProjects,
@@ -4075,7 +4252,7 @@ module.exports = {
   deleteManagerAgentRoute,
   updateManagerAgentStatusRoute,
   getAgentNotificationsRoute,
-  markNotificationReadRoute,
+  markAgentNotificationReadRoute,
   assignAgentToProjectRoute,
   removeAgentFromProjectRoute,
 
@@ -4083,7 +4260,10 @@ module.exports = {
   getNotificationsRoute,
   listUsersRoute,
   markNotificationReadRoute,
-  markAllNotificationsReadRoute
+  markAllNotificationsReadRoute,
+
+  // Activity
+  getActivityRoute,
 };
 
 // ============================================================================

@@ -301,7 +301,8 @@ async function buildServer() {
         required: ['content'],
         properties: {
           content: { type: 'string', minLength: 1, maxLength: 10000 },
-          metadata: { type: 'object' }
+          metadata: { type: 'object' },
+          agent_id: { type: 'string' }
         }
       }
     }
@@ -387,12 +388,15 @@ async function buildServer() {
   fastify.get('/api/admin/users', { preHandler: authMiddleware }, routes.listUsersRoute);
   fastify.post('/api/agents/:id/status', { preHandler: authMiddleware }, routes.updateManagerAgentStatusRoute);
   fastify.get('/api/agents/:id/notifications', { preHandler: authMiddleware }, routes.getAgentNotificationsRoute);
-  fastify.post('/api/agents/:id/notifications/:notificationId/read', { preHandler: authMiddleware }, routes.markNotificationReadRoute);
+  fastify.post('/api/agents/:id/notifications/:notificationId/read', { preHandler: authMiddleware }, routes.markAgentNotificationReadRoute);
 
   // User notifications
   fastify.get('/api/notifications', { preHandler: authMiddleware }, routes.getNotificationsRoute);
   fastify.post('/api/notifications/:id/read', { preHandler: authMiddleware }, routes.markNotificationReadRoute);
   fastify.post('/api/notifications/read-all', { preHandler: authMiddleware }, routes.markAllNotificationsReadRoute);
+
+  // Activity history
+  fastify.get('/api/activity', { preHandler: authMiddleware }, routes.getActivityRoute);
   fastify.post('/api/agents/:id/projects/:projectId', { preHandler: authMiddleware }, routes.assignAgentToProjectRoute);
   fastify.delete('/api/agents/:id/projects/:projectId', { preHandler: authMiddleware }, routes.removeAgentFromProjectRoute);
   fastify.get('/api/agents/:id/projects', { preHandler: authMiddleware }, routes.getAgentProjectsRoute);

@@ -99,9 +99,10 @@ class WebSocketManager {
   }
 
   // Specific event emitters
-  emitProjectStatusChanged(projectId, oldStatus, newStatus) {
+  emitProjectStatusChanged(projectId, oldStatus, newStatus, projectName) {
     this.broadcast('project:status_changed', {
       project_id: projectId,
+      project_name: projectName,
       old_status: oldStatus,
       new_status: newStatus,
       changed_at: new Date().toISOString()
@@ -225,12 +226,18 @@ class WebSocketManager {
 
   emitChannelMessage(message) {
     const payload = {
+      id: message.id,
       message_id: message.id,
       channel_id: message.channel_id,
-      sender_id: message.user_id,
+      channel_type: message.channel_type,
+      channel_name: message.channel_name,
+      sender_id: message.sender_id || message.user_id,
       sender_type: message.sender_type || 'user',
       sender_name: message.sender_name,
       sender_avatar: message.sender_avatar,
+      user_id: message.user_id,
+      agent_id: message.agent_id,
+      agent_role: message.agent_role,
       content: message.content,
       message_type: message.message_type,
       metadata: message.metadata,
@@ -353,8 +360,11 @@ class WebSocketManager {
     this.broadcast('task:assigned', {
       event_type: 'task_assigned',
       task_id: data.task_id,
+      task_title: data.task_title,
       project_id: projectId,
+      project_name: data.project_name,
       agent_id: data.agent_id,
+      agent_name: data.agent_name,
       previous_agent_id: data.previous_agent_id,
       assigned_by: data.assigned_by,
       assigned_at: new Date().toISOString()
@@ -365,7 +375,10 @@ class WebSocketManager {
       this.broadcast('agent:task_assigned', {
         event_type: 'task_assigned_to_you',
         task_id: data.task_id,
+        task_title: data.task_title,
         project_id: projectId,
+        project_name: data.project_name,
+        agent_id: data.agent_id,
         assigned_by: data.assigned_by,
         assigned_at: new Date().toISOString(),
         dm_channel_id: data.dm_channel_id
@@ -388,8 +401,11 @@ class WebSocketManager {
     this.broadcast('task:accepted', {
       event_type: 'task_accepted',
       task_id: data.task_id,
+      task_title: data.task_title,
       project_id: projectId,
+      project_name: data.project_name,
       agent_id: data.agent_id,
+      agent_name: data.agent_name,
       accepted_at: data.accepted_at
     }, { projectId });
   }
@@ -398,8 +414,11 @@ class WebSocketManager {
     this.broadcast('task:rejected', {
       event_type: 'task_rejected',
       task_id: data.task_id,
+      task_title: data.task_title,
       project_id: projectId,
+      project_name: data.project_name,
       agent_id: data.agent_id,
+      agent_name: data.agent_name,
       reason: data.reason,
       rejected_at: data.rejected_at
     }, { projectId });
@@ -409,8 +428,11 @@ class WebSocketManager {
     this.broadcast('task:started', {
       event_type: 'task_started',
       task_id: data.task_id,
+      task_title: data.task_title,
       project_id: projectId,
+      project_name: data.project_name,
       agent_id: data.agent_id,
+      agent_name: data.agent_name,
       started_at: data.started_at,
       comment: data.comment
     }, { projectId });
@@ -420,9 +442,13 @@ class WebSocketManager {
     this.broadcast('task:completed', {
       event_type: 'task_completed',
       task_id: data.task_id,
+      task_title: data.task_title,
       project_id: projectId,
+      project_name: data.project_name,
       agent_id: data.agent_id,
+      agent_name: data.agent_name,
       completed_at: data.completed_at,
+      result: data.result,
       comment: data.comment
     }, { projectId });
   }
@@ -487,8 +513,9 @@ class WebSocketManager {
     this.broadcast('task:created', {
       event_type: 'task_created',
       task_id: task.id,
+      task_title: task.title,
       project_id: projectId,
-      title: task.title,
+      project_name: task.project_name,
       status: task.status,
       priority: task.priority,
       agent_id: task.agent_id,
@@ -510,13 +537,51 @@ class WebSocketManager {
     this.broadcast('agent:task_assigned', {
       event_type: 'task_assigned_to_you',
       task_id: data.task_id,
+      task_title: data.task_title || data.title,
       project_id: data.project_id,
       project_name: data.project_name,
-      title: data.title,
+      agent_id: agentId,
       priority: data.priority,
       due_date: data.due_date,
       assigned_at: new Date().toISOString()
     }, { userId: agentId });
+  }
+
+  // Agent lifecycle events
+  emitAgentRegistered(agent) {
+    // Broadcast globally so admin sees it immediately in Activity / AdminPanel
+    this.broadcast('agent:registered', {
+      id: agent.id,
+      name: agent.name,
+      handle: agent.handle,
+      role: agent.role,
+      registered_at: agent.created_at,
+    });
+  }
+
+  emitAgentApproved(agent, approvedBy) {
+    const payload = {
+      id: agent.id,
+      name: agent.name,
+      handle: agent.handle,
+      approved_by: approvedBy,
+      approved_at: new Date().toISOString(),
+    };
+    // Global broadcast (Activity feed, AdminPanel)
+    this.broadcast('agent:approved', payload);
+    // Direct delivery to the agent itself
+    this.broadcast('agent:approved', payload, { userId: agent.id });
+  }
+
+  emitAgentRejected(agent, rejectedBy, reason) {
+    // Only notify the agent directly
+    this.broadcast('agent:rejected', {
+      id: agent.id,
+      name: agent.name,
+      reason: reason || 'Registration not approved',
+      rejected_by: rejectedBy,
+      rejected_at: new Date().toISOString(),
+    }, { userId: agent.id });
   }
 
   // ============================================================================

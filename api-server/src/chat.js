@@ -270,24 +270,26 @@ function shouldTriggerAgentResponse(content, channel, isDm) {
 }
 
 /**
- * Get agent by name or identifier
+ * Get agent by name, handle, or ID — queries manager_agents (active table)
  */
 async function getAgentByIdentifier(identifier) {
   const db = getDb();
 
-  // Try exact match on name
-  let agent = db.prepare('SELECT * FROM agents WHERE name = ? AND is_active = 1').get(identifier);
-
+  // Try exact name match
+  let agent = db.prepare('SELECT * FROM manager_agents WHERE name = ? AND is_approved = 1').get(identifier);
   if (agent) return agent;
 
-  // Try case-insensitive match
-  agent = db.prepare('SELECT * FROM agents WHERE LOWER(name) = LOWER(?) AND is_active = 1').get(identifier);
+  // Try handle match (strips leading @)
+  const handle = identifier.replace(/^@/, '');
+  agent = db.prepare('SELECT * FROM manager_agents WHERE handle = ? AND is_approved = 1').get(handle);
+  if (agent) return agent;
 
+  // Try case-insensitive name match
+  agent = db.prepare('SELECT * FROM manager_agents WHERE LOWER(name) = LOWER(?) AND is_approved = 1').get(identifier);
   if (agent) return agent;
 
   // Try ID match
-  agent = db.prepare('SELECT * FROM agents WHERE id = ? AND is_active = 1').get(identifier);
-
+  agent = db.prepare('SELECT * FROM manager_agents WHERE id = ? AND is_approved = 1').get(identifier);
   return agent;
 }
 
@@ -644,8 +646,13 @@ async function getChannelMessages(userId, channelId, options = {}) {
       content: m.content,
       sender_id: m.user_id || m.agent_id,
       sender_type: m.agent_id ? 'agent' : 'user',
-      sender_name: m.agent_name || m.user_name || 'Unknown',
-      sender_avatar: m.agent_avatar || m.user_avatar,
+      sender_name: m.agent_name || m.sender_name || m.user_name || 'Unknown',
+      sender_avatar: m.agent_avatar || m.sender_avatar || m.user_avatar,
+      user_id: m.user_id,
+      user_name: m.user_name,
+      agent_id: m.agent_id,
+      agent_name: m.agent_name,
+      agent_role: m.agent_role,
       message_type: m.message_type,
       metadata: JSON.parse(m.metadata || '{}'),
       parent_message_id: m.parent_message_id,
@@ -666,7 +673,7 @@ async function getChannelMessages(userId, channelId, options = {}) {
  */
 async function sendChannelMessage(userId, channelId, content, options = {}) {
   const db = getDb();
-  const { metadata = {} } = options;
+  const { metadata = {}, agentId = null } = options;
 
   // Verify user has access to this channel
   const channel = db.getChannelById(channelId);
@@ -682,31 +689,48 @@ async function sendChannelMessage(userId, channelId, content, options = {}) {
     channel.participant_2_id === userId ||
     channel.dm_user_id === userId ||
     channel.dm_agent_id === userId ||
+    (agentId && channel.dm_agent_id === agentId) ||
     db.prepare('SELECT 1 FROM channel_members WHERE channel_id = ? AND user_id = ?').get(channelId, userId);
 
   if (!hasAccess) {
     throw new Error('Access denied to this channel');
   }
 
-  // Create message
+  // Create message — agent messages store agent_id, not user_id
   const message = db.createMessage({
     channelId,
-    userId,
+    userId: agentId ? null : userId,
+    agentId: agentId || null,
     content,
     metadata
   });
 
   // Get sender info
-  const user = db.prepare('SELECT name, avatar_url FROM users WHERE id = ?').get(userId);
+  let senderName, senderAvatar, senderType, agentRole = null;
+  if (agentId) {
+    const agent = db.prepare('SELECT name, avatar_url, role FROM manager_agents WHERE id = ?').get(agentId);
+    senderName = agent?.name || 'Agent';
+    senderAvatar = agent?.avatar_url || null;
+    senderType = 'agent';
+    agentRole = agent?.role || null;
+  } else {
+    const user = db.prepare('SELECT name, avatar_url FROM users WHERE id = ?').get(userId);
+    senderName = user?.name || 'Unknown';
+    senderAvatar = user?.avatar_url || null;
+    senderType = 'user';
+  }
 
-  // Determine DM recipient for direct delivery
+  // Determine DM recipient for direct WS delivery (covers user↔agent and user↔user DMs)
+  const senderId = agentId || userId;
   let dmRecipientId = null;
-  if (channel.type === 'dm') {
-    if (channel.dm_user_id && channel.dm_user_id !== userId) {
+  if (channel.type === 'dm' || channel.is_dm) {
+    if (channel.dm_agent_id && channel.dm_agent_id !== senderId) {
+      dmRecipientId = channel.dm_agent_id;
+    } else if (channel.dm_user_id && channel.dm_user_id !== senderId) {
       dmRecipientId = channel.dm_user_id;
-    } else if (channel.participant_1_id && channel.participant_1_id !== userId) {
+    } else if (channel.participant_1_id && channel.participant_1_id !== senderId) {
       dmRecipientId = channel.participant_1_id;
-    } else if (channel.participant_2_id && channel.participant_2_id !== userId) {
+    } else if (channel.participant_2_id && channel.participant_2_id !== senderId) {
       dmRecipientId = channel.participant_2_id;
     }
   }
@@ -714,9 +738,13 @@ async function sendChannelMessage(userId, channelId, content, options = {}) {
   const fullMessage = {
     ...message,
     channel_id: channelId,
-    sender_name: user?.name || 'Unknown',
-    sender_avatar: user?.avatar_url,
-    sender_type: 'user',
+    channel_type: channel.type,
+    channel_name: channel.name,
+    sender_id: senderId,
+    sender_name: senderName,
+    sender_avatar: senderAvatar,
+    sender_type: senderType,
+    agent_role: agentRole,
     dm_recipient_id: dmRecipientId,
   };
 
