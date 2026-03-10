@@ -85,20 +85,15 @@ function ReadOnlyRedirect({
 
 // WebSocket connection manager - connects once at app level
 function WebSocketManager({ userId }: { userId?: string }) {
-  const { setIsConnected, currentChannelId } = useChatStore();
+  const { setIsConnected } = useChatStore();
 
   useEffect(() => {
-    // Connect to WebSocket once at app level
+    // Connect to WebSocket once at app level — do NOT re-run on channel changes
     wsClient.connect([], userId);
 
-    // Handle connection events
     const handleConnected = () => {
       setIsConnected(true);
       console.log('WebSocket connected');
-      // Re-subscribe to current channel if any
-      if (currentChannelId) {
-        wsClient.subscribeToChannel(currentChannelId);
-      }
     };
 
     const handleDisconnected = () => {
@@ -109,7 +104,6 @@ function WebSocketManager({ userId }: { userId?: string }) {
     wsClient.on('connected', handleConnected);
     wsClient.on('disconnected', handleDisconnected);
 
-    // Handle task events
     wsClient.on('task:assigned', (data: any) => {
       toast.info('Task Assigned', data?.task?.title ? 'Task: ' + data.task.title : undefined);
     });
@@ -126,13 +120,11 @@ function WebSocketManager({ userId }: { userId?: string }) {
       toast.info('Project Updated', data?.status ? 'Status: ' + data.status : undefined);
     });
 
-    // Don't disconnect on unmount - this is the key change!
-    // WebSocket stays connected for the lifetime of the app
     return () => {
       wsClient.off('connected', handleConnected);
       wsClient.off('disconnected', handleDisconnected);
     };
-  }, [userId, setIsConnected, currentChannelId]);
+  }, [userId, setIsConnected]);
 
   return null;
 }

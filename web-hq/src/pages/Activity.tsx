@@ -40,25 +40,23 @@ function fmtTime(ts: string) {
   return new Date(ts).toLocaleDateString();
 }
 
-function taskToActivity(t: any): ActivityItem {
-  const statusLabels: Record<string, string> = {
-    pending: 'created',
-    running: 'started',
-    completed: 'completed',
-    failed: 'failed',
-    cancelled: 'cancelled',
-  };
+function rowToActivity(r: any): ActivityItem {
   return {
-    id: t.id,
-    type: 'task',
-    action: `Task ${statusLabels[t.status] || t.status}`,
-    target: t.title,
-    detail: t.status,
-    project: t.project_name || t.project_id,
-    agent: t.agent_name || undefined,
-    time: fmtTime(t.updated_at || t.created_at),
-    raw_time: t.updated_at || t.created_at,
+    id: r.id,
+    type: (r.event_type as ActivityItem['type']) || 'system',
+    action: r.action || r.event_type,
+    target: r.entity_title || r.entity_id || '—',
+    detail: r.metadata?.status,
+    project: r.project_name || r.project_name_resolved || r.project_id || undefined,
+    agent: r.agent_name || r.agent_name_resolved || r.agent_id || undefined,
+    time: fmtTime(r.created_at),
+    raw_time: r.created_at,
   };
+}
+
+function liveItem(type: ActivityItem['type'], action: string, target: string, extra?: Partial<ActivityItem>): ActivityItem {
+  const now = new Date().toISOString();
+  return { id: String(Date.now()), type, action, target, time: 'just now', raw_time: now, ...extra };
 }
 
 const FILTER_OPTIONS = ['all', 'task', 'agent', 'project'] as const;
@@ -77,10 +75,10 @@ export default function Activity() {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchApi('/api/tasks?limit=50');
-      const tasks: ActivityItem[] = (data.tasks || []).map(taskToActivity);
-      tasks.sort((a, b) => new Date(b.raw_time).getTime() - new Date(a.raw_time).getTime());
-      setItems(tasks);
+      const data = await fetchApi('/api/activity?limit=50');
+      const activities: ActivityItem[] = (data.activities || []).map(rowToActivity);
+      activities.sort((a, b) => new Date(b.raw_time).getTime() - new Date(a.raw_time).getTime());
+      setItems(activities);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -97,26 +95,38 @@ export default function Activity() {
       setLiveCount(c => c + 1);
     };
 
-    const onTaskCreated = (d: any) => d?.task && addLive({ ...taskToActivity(d.task), action: 'Task created', time: 'just now', raw_time: new Date().toISOString() });
-    const onTaskAssigned = (d: any) => addLive({ id: d?.task_id || String(Date.now()), type: 'task', action: 'Task assigned', target: d?.task_title || d?.task_id || 'task', project: d?.project_name, agent: d?.agent_name, time: 'just now', raw_time: new Date().toISOString() });
-    const onTaskCompleted = (d: any) => addLive({ id: d?.task_id || String(Date.now()), type: 'task', action: 'Task completed', target: d?.task_title || d?.task_id || 'task', project: d?.project_name, agent: d?.agent_name, time: 'just now', raw_time: new Date().toISOString() });
-    const onTaskStarted = (d: any) => addLive({ id: d?.task_id || String(Date.now()), type: 'task', action: 'Task started', target: d?.task_title || 'task', project: d?.project_name, agent: d?.agent_name, time: 'just now', raw_time: new Date().toISOString() });
-    const onAgentAssigned = (d: any) => addLive({ id: String(Date.now()), type: 'agent', action: 'Agent assigned', target: d?.agent_name || 'agent', project: d?.project_name, time: 'just now', raw_time: new Date().toISOString() });
-    const onProjectChanged = (d: any) => addLive({ id: String(Date.now()), type: 'project', action: 'Project updated', target: d?.project_id || 'project', detail: d?.status, time: 'just now', raw_time: new Date().toISOString() });
+    const onTaskCreated   = (d: any) => addLive(liveItem('task',    'Task created',   d?.task?.title || d?.task_title || d?.task_id || 'task', { project: d?.project_name, agent: d?.agent_name }));
+    const onTaskAssigned  = (d: any) => addLive(liveItem('task',    'Task assigned',  d?.task_title || d?.task_id || 'task',                   { project: d?.project_name, agent: d?.agent_name }));
+    const onTaskAccepted  = (d: any) => addLive(liveItem('task',    'Task accepted',  d?.task_title || d?.task_id || 'task',                   { project: d?.project_name, agent: d?.agent_name }));
+    const onTaskStarted   = (d: any) => addLive(liveItem('task',    'Task started',   d?.task_title || d?.task_id || 'task',                   { project: d?.project_name, agent: d?.agent_name }));
+    const onTaskCompleted = (d: any) => addLive(liveItem('task',    'Task completed', d?.task_title || d?.task_id || 'task',                   { project: d?.project_name, agent: d?.agent_name }));
+    const onAgentAssigned = (d: any) => addLive(liveItem('agent',   'Agent assigned to project', d?.agent_name || 'agent',                    { project: d?.project_name }));
+    const onAgentRegistered = (d: any) => addLive(liveItem('agent', 'Agent registered', d?.name || d?.id || 'agent'));
+    const onAgentApproved = (d: any) => addLive(liveItem('agent',   'Agent approved', d?.name || d?.agent_name || d?.id || 'agent'));
+    const onProjectCreated = (d: any) => addLive(liveItem('project','Project created', d?.name || d?.project_name || d?.project_id || 'project'));
+    const onProjectChanged = (d: any) => addLive(liveItem('project','Project updated', d?.project_name || d?.project_id || 'project',          { detail: d?.status }));
 
-    wsClient.on('task:created', onTaskCreated);
-    wsClient.on('task:assigned', onTaskAssigned);
-    wsClient.on('task:completed', onTaskCompleted);
-    wsClient.on('task:started', onTaskStarted);
-    wsClient.on('agent:assigned', onAgentAssigned);
+    wsClient.on('task:created',           onTaskCreated);
+    wsClient.on('task:assigned',          onTaskAssigned);
+    wsClient.on('task:accepted',          onTaskAccepted);
+    wsClient.on('task:started',           onTaskStarted);
+    wsClient.on('task:completed',         onTaskCompleted);
+    wsClient.on('agent:registered',       onAgentRegistered);
+    wsClient.on('agent:assigned',         onAgentAssigned);
+    wsClient.on('agent:approved',         onAgentApproved);
+    wsClient.on('project:created',        onProjectCreated);
     wsClient.on('project:status_changed', onProjectChanged);
 
     return () => {
-      wsClient.off('task:created', onTaskCreated);
-      wsClient.off('task:assigned', onTaskAssigned);
-      wsClient.off('task:completed', onTaskCompleted);
-      wsClient.off('task:started', onTaskStarted);
-      wsClient.off('agent:assigned', onAgentAssigned);
+      wsClient.off('task:created',           onTaskCreated);
+      wsClient.off('task:assigned',          onTaskAssigned);
+      wsClient.off('task:accepted',          onTaskAccepted);
+      wsClient.off('task:started',           onTaskStarted);
+      wsClient.off('task:completed',         onTaskCompleted);
+      wsClient.off('agent:registered',       onAgentRegistered);
+      wsClient.off('agent:assigned',         onAgentAssigned);
+      wsClient.off('agent:approved',         onAgentApproved);
+      wsClient.off('project:created',        onProjectCreated);
       wsClient.off('project:status_changed', onProjectChanged);
     };
   }, []);

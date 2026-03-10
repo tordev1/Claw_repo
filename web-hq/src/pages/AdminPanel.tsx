@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { adminApi } from '../services/api';
+import { adminApi, wsClient } from '../services/api';
 import { Shield, CheckCircle, XCircle, Loader2, RefreshCw, Search, Bot, Users, UserCheck, Trash2 } from 'lucide-react';
 
 export default function AdminPanel() {
@@ -29,6 +29,22 @@ export default function AdminPanel() {
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  // Real-time: new agent registered → add to pending list immediately
+  useEffect(() => {
+    const onRegistered = (d: any) => {
+      const newAgent = { id: d?.id, name: d?.name, handle: d?.handle, role: d?.role, created_at: d?.registered_at };
+      setPending(prev => prev.some(a => a.id === newAgent.id) ? prev : [newAgent, ...prev]);
+      setOk(`New agent "${d?.name}" is waiting for approval`);
+    };
+    const onApproved = () => fetchData();
+    wsClient.on('agent:registered', onRegistered);
+    wsClient.on('agent:approved', onApproved);
+    return () => {
+      wsClient.off('agent:registered', onRegistered);
+      wsClient.off('agent:approved', onApproved);
+    };
+  }, []);
 
   const approve = async (id: string) => {
     setActLoad(id);

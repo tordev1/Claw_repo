@@ -4,7 +4,10 @@
       "Bash(netstat -ano)",
       "Bash(findstr :3001)",
       "Bash(findstr \":8080\")",
-      "Bash(ss -tlnp)"
+      "Bash(ss -tlnp)",
+      "Bash(find \"c:/Users/Daddy''s here~/Documents/project-claw-complete/api-server/src\" -name \"*.js\" -type f -exec wc -l {} +)",
+      "Bash(PROJ_DIR=\"c:\\\\Users\\\\Daddy''s here~\\\\Documents\\\\project-claw-complete\")",
+      "Bash(git -C \"$PROJ_DIR\" diff --stat HEAD)"
     ]
   }
 }
