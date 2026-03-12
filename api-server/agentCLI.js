@@ -415,6 +415,13 @@ async function main() {
             }
         }
 
+        if (ev === 'chat:channel_created') {
+            if (data?.type === 'dm' && data?.dm_agent_id === agentId && data?.channel_id) {
+                myDMChannels.add(data.channel_id);
+                log('CHAT', `New DM channel registered: ${data.channel_id}`, C.G);
+            }
+        }
+
         if (ev === 'notification:new' || ev === 'agent:notification') {
             log('NOTIF', `🔔 ${data?.title || ev}: ${data?.content || data?.message || ''}`, C.Y);
         }
@@ -429,7 +436,11 @@ async function main() {
             if (data?.content) {
                 const sender = data?.sender_name || '?';
                 const channelId = data?.channel_id;
-                const isDM = myDMChannels.has(channelId);
+                // Primary: channel ID set (populated at startup + channel_created events)
+                // Fallback: dm_recipient_id for first message before channel_created fires
+                const isDM = myDMChannels.has(channelId) ||
+                    (data?.channel_type === 'dm' && data?.dm_recipient_id === agentId);
+                if (isDM && channelId) myDMChannels.add(channelId); // cache it
                 const mentioned = isMentioned(data.content);
 
                 log('MSG', `💬 [#${data?.channel_name || channelId}] ${sender}: ${data.content}`, C.C);
