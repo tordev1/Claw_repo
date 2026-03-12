@@ -125,7 +125,7 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
         </Link>
 
         <a
-          href="http://localhost:4040"
+          href={import.meta.env.VITE_DOCS_URL || 'http://localhost:4040'}
           target="_blank"
           rel="noopener noreferrer"
           className="ops-nav-item"
