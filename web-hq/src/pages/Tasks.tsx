@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { tasksApi, projectsApi } from '../services/api';
 import { Plus, Loader2, LayoutGrid, List } from 'lucide-react';
+import TaskCreationForm from '../components/TaskCreationForm';
 
 interface Task { id: string; title: string; status: string; priority: string; assignee?: string; projectId?: string; }
 
@@ -15,6 +16,7 @@ export default function Tasks() {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'kanban' | 'list'>('kanban');
   const [selProj, setSelProj] = useState('all');
+  const [showCreate, setShowCreate] = useState(false);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -73,7 +75,7 @@ export default function Tasks() {
               </button>
             ))}
           </div>
-          <button className="ops-btn flex items-center gap-1"><Plus size={11} /> Create Task</button>
+          <button className="ops-btn flex items-center gap-1" onClick={() => setShowCreate(true)}><Plus size={11} /> Create Task</button>
         </div>
       </div>
 
@@ -121,6 +123,14 @@ export default function Tasks() {
             </table>
           )}
         </div>
+      )}
+      {showCreate && projects.length > 0 && (
+        <TaskCreationForm
+          projects={projects}
+          defaultProjectId={selProj !== 'all' ? selProj : undefined}
+          onClose={() => setShowCreate(false)}
+          onCreated={() => { setShowCreate(false); fetchAll(); }}
+        />
       )}
     </div>
   );

@@ -1,408 +1,251 @@
 import { useState, useEffect } from 'react';
-import { X, AlertCircle, Calendar, Clock, Tag, Users, Loader2, Plus, X as XIcon } from 'lucide-react';
-import { tasksApi, agentsApi, type Agent } from '../services/api';
+import { X, Loader2, AlertCircle, ChevronDown } from 'lucide-react';
+import { tasksApi, projectAgentsApi } from '../services/api';
 
-interface TaskCreationFormProps {
-  projectId: string;
-  projectName: string;
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface Project { id: string; name: string }
+interface AgentItem { id: string; name: string; handle: string; role?: string; agent_type?: string; status?: string }
+
+interface Props {
+  projects: Project[];
+  defaultProjectId?: string;
   onClose: () => void;
   onCreated: () => void;
 }
 
-const COMMON_LABELS = [
-  'bug', 'feature', 'frontend', 'backend', 'api', 'ui', 'ux', 
-  'docs', 'testing', 'security', 'performance', 'refactor'
-];
+// ── Constants ─────────────────────────────────────────────────────────────────
 
-export default function TaskCreationForm({ projectId, projectName, onClose, onCreated }: TaskCreationFormProps) {
-  const [title, setTitle] = useState('');
+const mono: React.CSSProperties = { fontFamily: 'var(--font-mono)' };
+
+const PRI_OPTIONS = [
+  { value: 1, label: 'CRITICAL', color: '#ef4444' },
+  { value: 2, label: 'HIGH',     color: '#f97316' },
+  { value: 3, label: 'MEDIUM',   color: '#faa81a' },
+  { value: 4, label: 'LOW',      color: '#64748b' },
+] as const;
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+export default function TaskCreationForm({ projects, defaultProjectId, onClose, onCreated }: Props) {
+  const [projectId, setProjectId] = useState(defaultProjectId || projects[0]?.id || '');
+  const [title, setTitle]         = useState('');
   const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState<'low' | 'medium' | 'high' | 'critical'>('medium');
-  const [dueDate, setDueDate] = useState('');
-  const [estimatedHours, setEstimatedHours] = useState('');
-  const [labels, setLabels] = useState<string[]>([]);
-  const [customLabel, setCustomLabel] = useState('');
-  const [selectedAssignees, setSelectedAssignees] = useState<string[]>([]);
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [priority, setPriority]   = useState<number>(3);
+  const [agentId, setAgentId]     = useState('');
+
+  const [agents, setAgents]       = useState<AgentItem[]>([]);
   const [loadingAgents, setLoadingAgents] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError]         = useState<string | null>(null);
 
-  // Load available agents on mount
+  // Load agents whenever selected project changes
   useEffect(() => {
-    loadAgents();
-  }, []);
-
-  const loadAgents = async () => {
-    try {
-      setLoadingAgents(true);
-      const response = await agentsApi.list({ status: 'online' });
-      setAgents(response.agents || []);
-    } catch (err) {
-      console.error('Failed to load agents:', err);
-    } finally {
-      setLoadingAgents(false);
-    }
-  };
-
-  const toggleLabel = (label: string) => {
-    setLabels(prev => 
-      prev.includes(label) 
-        ? prev.filter(l => l !== label)
-        : [...prev, label]
-    );
-  };
-
-  const addCustomLabel = () => {
-    if (customLabel.trim() && !labels.includes(customLabel.trim())) {
-      setLabels([...labels, customLabel.trim()]);
-      setCustomLabel('');
-    }
-  };
-
-  const removeLabel = (label: string) => {
-    setLabels(prev => prev.filter(l => l !== label));
-  };
-
-  const toggleAssignee = (agentId: string) => {
-    setSelectedAssignees(prev => 
-      prev.includes(agentId)
-        ? prev.filter(id => id !== agentId)
-        : [...prev, agentId]
-    );
-  };
-
-  const priorityOptions = [
-    { value: 'low', label: 'Low', color: 'bg-slate-500/20 text-slate-400 border-slate-500/30' },
-    { value: 'medium', label: 'Medium', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
-    { value: 'high', label: 'High', color: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
-    { value: 'critical', label: 'Critical', color: 'bg-red-500/20 text-red-400 border-red-500/30' },
-  ];
+    if (!projectId) { setAgents([]); return; }
+    setLoadingAgents(true);
+    setAgentId('');
+    projectAgentsApi.listByProject(projectId)
+      .then(res => {
+        const list: AgentItem[] = res?.agents || res || [];
+        setAgents(list);
+      })
+      .catch(() => setAgents([]))
+      .finally(() => setLoadingAgents(false));
+  }, [projectId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!title.trim()) {
-      setError('Task title is required');
-      return;
-    }
+    if (!title.trim()) { setError('Title is required'); return; }
+    if (!projectId)    { setError('Select a project'); return; }
 
+    setSubmitting(true); setError(null);
     try {
-      setLoading(true);
-      setError(null);
-
-      const taskData: {
-        title: string;
-        description?: string;
-        priority: string;
-        due_date?: string;
-        estimated_hours?: number;
-        labels?: string[];
-        assignee_ids?: string[];
-      } = {
+      await (tasksApi.create as any)(projectId, {
         title: title.trim(),
-        description: description.trim(),
-        priority,
-      };
+        description: description.trim() || undefined,
+        priority: priorityLabel(priority),
+        agent_id: agentId || undefined,
+      });
 
-      if (dueDate) {
-        taskData.due_date = new Date(dueDate).toISOString();
-      }
-      if (estimatedHours) {
-        taskData.estimated_hours = parseInt(estimatedHours);
-      }
-      if (labels.length > 0) {
-        taskData.labels = labels;
-      }
-      if (selectedAssignees.length > 0) {
-        taskData.assignee_ids = selectedAssignees;
-      }
-
-      await tasksApi.create(projectId, taskData);
       onCreated();
       onClose();
-    } catch (err: any) {
-      setError(err.message || 'Failed to create task');
+    } catch (e: any) {
+      setError(e.message || 'Failed to create task');
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
+  // Close on backdrop click
+  const handleBackdrop = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget) onClose();
+  };
+
+  // ESC key
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+    <div
+      onClick={handleBackdrop}
+      style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+    >
+      <div style={{ background: 'var(--ink-1)', border: '1px solid var(--ink-4)', borderRadius: 4, width: '100%', maxWidth: 480, maxHeight: '90vh', overflow: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.6)' }}>
+
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-slate-700">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '1px solid var(--ink-4)' }}>
           <div>
-            <h2 className="text-lg font-semibold text-slate-50">Create New Task</h2>
-            <p className="text-sm text-slate-400">in {projectName}</p>
+            <div style={{ ...mono, fontSize: 9, color: 'var(--text-lo)', letterSpacing: '0.1em', marginBottom: 2 }}>TASK CENTER</div>
+            <div style={{ ...mono, fontSize: 14, fontWeight: 700, color: 'var(--text-hi)', letterSpacing: '-0.01em' }}>CREATE TASK</div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-700 rounded-lg transition-colors"
-          >
-            <X className="w-5 h-5" />
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-lo)', padding: 4, display: 'flex' }}>
+            <X size={16} />
           </button>
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="p-4 space-y-4">
-          {error && (
-            <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
-              <AlertCircle className="w-4 h-4" />
-              {error}
-            </div>
-          )}
+        <form onSubmit={handleSubmit} style={{ padding: '18px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-          {/* Title */}
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">
-              Task Title <span className="text-red-400">*</span>
-            </label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g., Implement authentication middleware"
-              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary"
-              disabled={loading}
-            />
-          </div>
-
-          {/* Description */}
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">
-              Description
-            </label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Describe what needs to be done..."
-              rows={4}
-              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary resize-none"
-              disabled={loading}
-            />
-          </div>
-
-          {/* Priority */}
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">
-              Priority
-            </label>
-            <div className="grid grid-cols-4 gap-2">
-              {priorityOptions.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => setPriority(option.value as typeof priority)}
-                  className={`px-3 py-2 rounded-lg border text-sm font-medium transition-all ${
-                    priority === option.value
-                      ? option.color + ' ring-2 ring-offset-1 ring-offset-slate-800 ring-current'
-                      : 'bg-slate-700/50 border-slate-600 text-slate-400 hover:bg-slate-700'
-                  }`}
-                  disabled={loading}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Due Date & Estimated Hours */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1">
-                <span className="flex items-center gap-1">
-                  <Calendar className="w-4 h-4" />
-                  Due Date
-                </span>
-              </label>
-              <input
-                type="datetime-local"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary"
-                disabled={loading}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1">
-                <span className="flex items-center gap-1">
-                  <Clock className="w-4 h-4" />
-                  Est. Hours
-                </span>
-              </label>
-              <input
-                type="number"
-                min="1"
-                value={estimatedHours}
-                onChange={(e) => setEstimatedHours(e.target.value)}
-                placeholder="8"
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary"
-                disabled={loading}
-              />
-            </div>
-          </div>
-
-          {/* Labels */}
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">
-              <span className="flex items-center gap-1">
-                <Tag className="w-4 h-4" />
-                Labels
-              </span>
-            </label>
-            
-            {/* Common Labels */}
-            <div className="flex flex-wrap gap-2 mb-3">
-              {COMMON_LABELS.map((label) => (
-                <button
-                  key={label}
-                  type="button"
-                  onClick={() => toggleLabel(label)}
-                  className={`px-2 py-1 text-xs font-medium rounded-full border transition-all ${
-                    labels.includes(label)
-                      ? 'bg-primary/20 text-primary border-primary/50'
-                      : 'bg-slate-700/50 text-slate-400 border-slate-600 hover:bg-slate-700'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {/* Custom Label Input */}
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={customLabel}
-                onChange={(e) => setCustomLabel(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    addCustomLabel();
-                  }
-                }}
-                placeholder="Add custom label..."
-                className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary text-sm"
-                disabled={loading}
-              />
-              <button
-                type="button"
-                onClick={addCustomLabel}
-                disabled={!customLabel.trim()}
-                className="px-3 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-300 rounded-lg transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Selected Labels */}
-            {labels.length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-3">
-                {labels.map((label) => (
-                  <span
-                    key={label}
-                    className="inline-flex items-center gap-1 px-2 py-1 bg-primary/10 text-primary text-xs font-medium rounded-full border border-primary/30"
-                  >
-                    {label}
-                    <button
-                      type="button"
-                      onClick={() => removeLabel(label)}
-                      className="hover:text-red-400"
-                    >
-                      <XIcon className="w-3 h-3" />
-                    </button>
-                  </span>
-                ))}
+            {error && (
+              <div style={{ ...mono, fontSize: 10, color: '#ef4444', background: '#ef444410', border: '1px solid #ef444430', borderRadius: 2, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <AlertCircle size={12} /> {error}
               </div>
             )}
-          </div>
 
-          {/* Assignees */}
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">
-              <span className="flex items-center gap-1">
-                <Users className="w-4 h-4" />
-                Assign To
-              </span>
-            </label>
-            
-            {loadingAgents ? (
-              <div className="flex items-center gap-2 p-3 bg-slate-900 rounded-lg text-slate-500 text-sm">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Loading agents...
+            {/* Project picker */}
+            <div>
+              <label style={{ ...mono, fontSize: 9, color: 'var(--text-lo)', letterSpacing: '0.1em', display: 'block', marginBottom: 5 }}>PROJECT *</label>
+              <div style={{ position: 'relative' }}>
+                <select
+                  value={projectId}
+                  onChange={e => setProjectId(e.target.value)}
+                  disabled={submitting}
+                  className="ops-input"
+                  style={{ width: '100%', cursor: 'pointer', appearance: 'none', paddingRight: 30 }}
+                >
+                  <option value="">— select project —</option>
+                  {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                <ChevronDown size={12} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-lo)' }} />
               </div>
-            ) : agents.length === 0 ? (
-              <div className="p-3 bg-slate-900 rounded-lg text-slate-500 text-sm">
-                No agents available
-              </div>
-            ) : (
-              <div className="space-y-2 max-h-40 overflow-y-auto bg-slate-900 rounded-lg p-2 border border-slate-700">
-                {agents.map((agent) => (
+            </div>
+
+            {/* Title */}
+            <div>
+              <label style={{ ...mono, fontSize: 9, color: 'var(--text-lo)', letterSpacing: '0.1em', display: 'block', marginBottom: 5 }}>TITLE *</label>
+              <input
+                type="text"
+                value={title}
+                onChange={e => setTitle(e.target.value)}
+                placeholder="e.g., Implement auth middleware"
+                disabled={submitting}
+                autoFocus
+                className="ops-input"
+                style={{ width: '100%' }}
+              />
+            </div>
+
+            {/* Description */}
+            <div>
+              <label style={{ ...mono, fontSize: 9, color: 'var(--text-lo)', letterSpacing: '0.1em', display: 'block', marginBottom: 5 }}>DESCRIPTION</label>
+              <textarea
+                value={description}
+                onChange={e => setDescription(e.target.value)}
+                placeholder="What needs to be done..."
+                rows={3}
+                disabled={submitting}
+                className="ops-input"
+                style={{ width: '100%', resize: 'vertical', minHeight: 68 }}
+              />
+            </div>
+
+            {/* Priority */}
+            <div>
+              <label style={{ ...mono, fontSize: 9, color: 'var(--text-lo)', letterSpacing: '0.1em', display: 'block', marginBottom: 5 }}>PRIORITY</label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+                {PRI_OPTIONS.map(opt => (
                   <button
-                    key={agent.id}
+                    key={opt.value}
                     type="button"
-                    onClick={() => toggleAssignee(agent.id)}
-                    className={`w-full flex items-center gap-3 p-2 rounded-lg transition-all text-left ${
-                      selectedAssignees.includes(agent.id)
-                        ? 'bg-primary/10 border border-primary/30'
-                        : 'hover:bg-slate-800'
-                    }`}
+                    onClick={() => setPriority(opt.value)}
+                    disabled={submitting}
+                    style={{
+                      ...mono, fontSize: 9, letterSpacing: '0.07em', padding: '6px 0', borderRadius: 2, cursor: 'pointer', border: `1px solid ${priority === opt.value ? opt.color : 'var(--ink-4)'}`,
+                      background: priority === opt.value ? `${opt.color}18` : 'var(--ink-3)',
+                      color: priority === opt.value ? opt.color : 'var(--text-lo)',
+                    }}
                   >
-                    <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center">
-                      <span className="text-xs font-medium text-white">
-                        {agent.name.charAt(0).toUpperCase()}
-                      </span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-slate-200 text-sm">{agent.name}</p>
-                      <p className="text-xs text-slate-500">@{agent.handle}</p>
-                    </div>
-                    {selectedAssignees.includes(agent.id) && (
-                      <div className="w-5 h-5 bg-primary rounded-full flex items-center justify-center">
-                        <CheckCircle2 className="w-3 h-3 text-white" />
-                      </div>
-                    )}
+                    {opt.label}
                   </button>
                 ))}
               </div>
-            )}
-            
-            {selectedAssignees.length > 0 && (
-              <p className="text-xs text-slate-500 mt-2">
-                {selectedAssignees.length} agent{selectedAssignees.length !== 1 ? 's' : ''} selected
-              </p>
-            )}
+            </div>
+
+            {/* Assign to agent */}
+            <div>
+              <label style={{ ...mono, fontSize: 9, color: 'var(--text-lo)', letterSpacing: '0.1em', display: 'block', marginBottom: 5 }}>
+                ASSIGN TO AGENT {!projectId && <span style={{ color: '#64748b' }}>(select project first)</span>}
+              </label>
+              {loadingAgents ? (
+                <div style={{ ...mono, fontSize: 10, color: 'var(--text-lo)', display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', background: 'var(--ink-3)', border: '1px solid var(--ink-4)', borderRadius: 2 }}>
+                  <Loader2 size={10} className="animate-spin" /> loading agents...
+                </div>
+              ) : (
+                <div style={{ position: 'relative' }}>
+                  <select
+                    value={agentId}
+                    onChange={e => setAgentId(e.target.value)}
+                    disabled={submitting || !projectId || agents.length === 0}
+                    className="ops-input"
+                    style={{ width: '100%', cursor: 'pointer', appearance: 'none', paddingRight: 30 }}
+                  >
+                    <option value="">— unassigned —</option>
+                    {agents.map(a => (
+                      <option key={a.id} value={a.id}>
+                        {a.name} @{a.handle}{a.role ? ` · ${a.role}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={12} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-lo)' }} />
+                </div>
+              )}
+              {projectId && !loadingAgents && agents.length === 0 && (
+                <div style={{ ...mono, fontSize: 9, color: 'var(--text-lo)', marginTop: 4 }}>No agents assigned to this project yet.</div>
+              )}
+            </div>
+
           </div>
 
-          {/* Actions */}
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-700">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-slate-300 hover:text-slate-100 transition-colors"
-              disabled={loading}
-            >
-              Cancel
+          {/* Footer */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--ink-4)' }}>
+            <button type="button" onClick={onClose} disabled={submitting} className="ops-btn" style={{ color: 'var(--text-lo)' }}>
+              CANCEL
             </button>
             <button
               type="submit"
-              disabled={loading || !title.trim()}
-              className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 disabled:bg-slate-700 disabled:text-slate-500 text-white font-medium rounded-lg transition-colors"
+              disabled={submitting || !title.trim() || !projectId}
+              style={{
+                ...mono, fontSize: 10, letterSpacing: '0.08em', padding: '7px 20px', borderRadius: 2, cursor: submitting || !title.trim() || !projectId ? 'not-allowed' : 'pointer', border: 'none',
+                background: submitting || !title.trim() || !projectId ? 'var(--ink-3)' : 'var(--amber)',
+                color:      submitting || !title.trim() || !projectId ? 'var(--text-lo)' : '#000',
+                fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6,
+              }}
             >
-              {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Creating...
-                </>
-              ) : (
-                'Create Task'
-              )}
+              {submitting ? <><Loader2 size={10} className="animate-spin" /> CREATING...</> : 'CREATE TASK'}
             </button>
           </div>
         </form>
       </div>
     </div>
   );
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function priorityLabel(n: number): string {
+  return ({ 1: 'critical', 2: 'high', 3: 'medium', 4: 'low' } as Record<number, string>)[n] || 'medium';
 }
