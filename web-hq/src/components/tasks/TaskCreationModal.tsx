@@ -32,7 +32,7 @@ const PRIORITIES = [
   { value: 'low', label: 'Low', color: 'bg-slate-500', icon: Flag },
   { value: 'medium', label: 'Medium', color: 'bg-blue-500', icon: Flag },
   { value: 'high', label: 'High', color: 'bg-orange-500', icon: Flag },
-  { value: 'urgent', label: 'Urgent', color: 'bg-red-500', icon: AlertCircle },
+  { value: 'critical', label: 'Critical', color: 'bg-red-500', icon: AlertCircle },
 ];
 
 export default function TaskCreationModal({ 
@@ -44,7 +44,7 @@ export default function TaskCreationModal({
   // Form state
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState<'low' | 'medium' | 'high' | 'urgent'>('medium');
+  const [priority, setPriority] = useState<'low' | 'medium' | 'high' | 'critical'>('medium');
   const [dueDate, setDueDate] = useState('');
   const [estimatedHours, setEstimatedHours] = useState('');
   const [tags, setTags] = useState<string[]>([]);

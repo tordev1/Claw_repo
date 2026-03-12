@@ -43,14 +43,12 @@ interface Project {
 interface Task {
   id: string;
   title: string;
-  projectId: string;
-  projectName: string;
-  projectColor: string;
-  status: 'backlog' | 'in_progress' | 'review' | 'done';
-  priority: 'low' | 'medium' | 'high' | 'urgent';
-  assignee?: string;
-  estimatedCost?: number;
-  actualCost: number;
+  project_id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  priority: 'low' | 'medium' | 'high' | 'critical';
+  agent?: { id: string; name: string; handle?: string } | null;
+  estimated_cost?: number;
+  actual_cost?: number;
 }
 
 interface ProjectAgent {
@@ -69,8 +67,9 @@ const getStatusBg = (status: string) => {
       return 'bg-green-500/20 text-green-400';
     case 'standby':
     case 'running':
-    case 'pending':
       return 'bg-yellow-500/20 text-yellow-400';
+    case 'pending':
+      return 'bg-blue-500/20 text-blue-400';
     case 'offline':
     case 'failed':
     case 'cancelled':
@@ -87,8 +86,9 @@ const getStatusColor = (status: string) => {
       return 'text-green-400';
     case 'standby':
     case 'running':
-    case 'pending':
       return 'text-yellow-400';
+    case 'pending':
+      return 'text-blue-400';
     case 'offline':
     case 'failed':
     case 'cancelled':
@@ -110,7 +110,7 @@ const getProjectTypeDot = (type: string) => {
 
 const getPriorityColor = (priority: string) => {
   switch (priority) {
-    case 'urgent': return 'text-red-400';
+    case 'critical': return 'text-red-400';
     case 'high': return 'text-orange-400';
     case 'medium': return 'text-yellow-400';
     default: return 'text-slate-400';

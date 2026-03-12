@@ -46,7 +46,7 @@ function rowToActivity(r: any): ActivityItem {
     type: (r.event_type as ActivityItem['type']) || 'system',
     action: r.action || r.event_type,
     target: r.entity_title || r.entity_id || '—',
-    detail: r.metadata?.status,
+    detail: (() => { try { const m = typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata; return m?.status; } catch { return undefined; } })(),
     project: r.project_name || r.project_name_resolved || r.project_id || undefined,
     agent: r.agent_name || r.agent_name_resolved || r.agent_id || undefined,
     time: fmtTime(r.created_at),

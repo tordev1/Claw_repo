@@ -3,7 +3,7 @@ import { tasksApi, projectsApi } from '../services/api';
 import { Plus, Loader2, LayoutGrid, List } from 'lucide-react';
 import TaskCreationForm from '../components/TaskCreationForm';
 
-interface Task { id: string; title: string; status: string; priority: string; assignee?: string; projectId?: string; }
+interface Task { id: string; title: string; status: string; priority: string; assignee?: string; projectId?: string; agent?: { id: string; name: string; handle?: string } | null; }
 
 const STATUS_COLS = ['pending', 'running', 'completed', 'failed', 'cancelled'];
 const STATUS_LABEL: Record<string, string> = { pending: 'PENDING', running: 'RUNNING', completed: 'COMPLETED', failed: 'FAILED', cancelled: 'CANCELLED' };
@@ -49,7 +49,7 @@ export default function Tasks() {
       <div style={{ ...mono, fontSize: 12, color: 'var(--text-hi)', marginBottom: 6, lineHeight: 1.4 }}>{task.title}</div>
       <div className="flex items-center justify-between">
         <span style={{ ...mono, fontSize: 9, color: PRI_COLOR[task.priority] || 'var(--text-lo)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{task.priority || '—'}</span>
-        {task.assignee && <span style={{ ...mono, fontSize: 9, color: 'var(--text-lo)' }}>@{task.assignee}</span>}
+        {(task.agent?.handle || task.assignee) && <span style={{ ...mono, fontSize: 9, color: 'var(--text-lo)' }}>@{task.agent?.handle || task.assignee}</span>}
       </div>
     </div>
   );
@@ -116,7 +116,7 @@ export default function Tasks() {
                     <td style={{ color: 'var(--text-hi)' }}>{t.title}</td>
                     <td><span style={{ color: STATUS_COLOR[t.status || 'pending'], ...mono, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{STATUS_LABEL[t.status || 'pending']}</span></td>
                     <td><span style={{ color: PRI_COLOR[t.priority] || 'var(--text-lo)', ...mono, fontSize: 10, textTransform: 'uppercase' }}>{t.priority || '—'}</span></td>
-                    <td style={{ color: 'var(--text-lo)' }}>{t.assignee ? '@' + t.assignee : '—'}</td>
+                    <td style={{ color: 'var(--text-lo)' }}>{t.agent?.handle ? '@' + t.agent.handle : t.assignee ? '@' + t.assignee : '—'}</td>
                   </tr>
                 ))}
               </tbody>

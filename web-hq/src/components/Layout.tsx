@@ -4,7 +4,7 @@ import {
   LayoutDashboard, FolderKanban, CheckSquare, DollarSign,
   Activity, Settings, MessageSquare, Bot, Menu, X,
   LogOut, ChevronRight, Shield, Coins, UserPlus, Radio, Shuffle,
-  Zap
+  Zap, BookOpen
 } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 
@@ -123,6 +123,19 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
           <Settings size={12} strokeWidth={1.5} />
           Settings
         </Link>
+
+        <a
+          href="http://localhost:4040"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ops-nav-item"
+          style={{ color: 'var(--cyan)', opacity: 0.7 }}
+          onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+          onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
+        >
+          <BookOpen size={12} strokeWidth={1.5} />
+          Docs
+        </a>
 
         {user && (
           <div style={{

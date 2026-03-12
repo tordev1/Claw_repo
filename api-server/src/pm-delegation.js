@@ -131,9 +131,9 @@ function delegateTasksToWorkers(projectId, tasks, pmAgentId, db, wsManager) {
     const worker = pickWorker(task.title, workers, taskCounts);
     if (!worker) continue;
 
-    // Assign task to worker in DB
-    db.prepare(`UPDATE tasks SET agent_id = ?, assigned_by = ?, assigned_at = ?, updated_at = ? WHERE id = ?`)
-      .run(worker.id, pmAgentId, now, now, task.id);
+    // Assign task to worker in DB (assigned_by is NULL — automated PM delegation, no direct user)
+    db.prepare(`UPDATE tasks SET agent_id = ?, assigned_by = NULL, assigned_at = ?, updated_at = ? WHERE id = ?`)
+      .run(worker.id, now, now, task.id);
 
     taskCounts[worker.id] = (taskCounts[worker.id] || 0) + 1;
 

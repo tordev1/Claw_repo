@@ -297,9 +297,9 @@ async function getProjectTasks(request, reply) {
   return {
     tasks: tasks.map(t => ({
       ...t,
-      payload: JSON.parse(t.payload || '{}'),
-      result: t.result ? JSON.parse(t.result) : null,
-      tags: JSON.parse(t.tags || '[]'),
+      payload: (() => { try { return JSON.parse(t.payload || '{}'); } catch { return {}; } })(),
+      result: t.result ? (() => { try { return JSON.parse(t.result); } catch { return t.result; } })() : null,
+      tags: (() => { try { return JSON.parse(t.tags || '[]'); } catch { return []; } })(),
       agent: t.agent_id ? {
         id: t.agent_id,
         name: t.agent_name,
@@ -504,9 +504,9 @@ async function getTaskById(request, reply) {
 
   return {
     ...task,
-    payload: JSON.parse(task.payload || '{}'),
-    result: task.result ? JSON.parse(task.result) : null,
-    tags: JSON.parse(task.tags || '[]'),
+    payload: (() => { try { return JSON.parse(task.payload || '{}'); } catch { return {}; } })(),
+    result: task.result ? (() => { try { return JSON.parse(task.result); } catch { return task.result; } })() : null,
+    tags: (() => { try { return JSON.parse(task.tags || '[]'); } catch { return []; } })(),
     project: {
       id: task.project_id,
       name: task.project_name
@@ -806,7 +806,7 @@ async function acceptTask(request, reply) {
 
   // Add system comment
   db.prepare(`
-    INSERT INTO task_comments (id, task_id, author_agent_id, content, is_system, created_at)
+    INSERT INTO task_comments (id, task_id, author_id, content, is_system, created_at)
     VALUES (?, ?, ?, 'Task accepted', TRUE, ?)
   `).run(generateId(), id, userId, now);
 
@@ -883,7 +883,7 @@ async function rejectTask(request, reply) {
   // Add system comment with rejection reason
   const content = reason ? `Task rejected. Reason: ${reason}` : 'Task rejected';
   db.prepare(`
-    INSERT INTO task_comments (id, task_id, author_agent_id, content, is_system, metadata, created_at)
+    INSERT INTO task_comments (id, task_id, author_id, content, is_system, metadata, created_at)
     VALUES (?, ?, ?, ?, TRUE, ?, ?)
   `).run(generateId(), id, userId, content, JSON.stringify({ reason }), now);
 
@@ -973,7 +973,7 @@ async function startTask(request, reply) {
   // Add system comment
   const content = comment ? `Task started. ${comment}` : 'Task started';
   db.prepare(`
-    INSERT INTO task_comments (id, task_id, author_agent_id, content, is_system, metadata, created_at)
+    INSERT INTO task_comments (id, task_id, author_id, content, is_system, metadata, created_at)
     VALUES (?, ?, ?, ?, TRUE, ?, ?)
   `).run(generateId(), id, userId, content, JSON.stringify({ comment }), now);
 
@@ -1037,7 +1037,7 @@ async function completeTask(request, reply) {
   // Add system comment
   const content = comment ? `Task completed. ${comment}` : 'Task completed';
   db.prepare(`
-    INSERT INTO task_comments (id, task_id, author_agent_id, content, is_system, metadata, created_at)
+    INSERT INTO task_comments (id, task_id, author_id, content, is_system, metadata, created_at)
     VALUES (?, ?, ?, ?, TRUE, ?, ?)
   `).run(generateId(), id, userId, content, JSON.stringify({ result, comment }), now);
 
@@ -1460,9 +1460,9 @@ async function searchTasks(request, reply) {
   return {
     tasks: tasks.map(t => ({
       ...t,
-      payload: JSON.parse(t.payload || '{}'),
-      result: t.result ? JSON.parse(t.result) : null,
-      tags: JSON.parse(t.tags || '[]')
+      payload: (() => { try { return JSON.parse(t.payload || '{}'); } catch { return {}; } })(),
+      result: t.result ? (() => { try { return JSON.parse(t.result); } catch { return t.result; } })() : null,
+      tags: (() => { try { return JSON.parse(t.tags || '[]'); } catch { return []; } })()
     })),
     total: tasks.length,
     limit: parseInt(limit),
@@ -2893,7 +2893,7 @@ async function assignAgentToProjectRouteV2(request, reply) {
       try {
         const path = require('path');
         const fs = require('fs');
-        const presetPath = path.join(__dirname, '../../presets/pm_modes', `${agent.current_mode}.md`);
+        const presetPath = path.join(__dirname, `${agent.current_mode}.md`);
         if (fs.existsSync(presetPath)) {
           const content = fs.readFileSync(presetPath, 'utf8');
           // Extract lines under "## Task Breakdown Template"
