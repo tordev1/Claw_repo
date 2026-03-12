@@ -241,7 +241,8 @@ class WebSocketManager {
       content: message.content,
       message_type: message.message_type,
       metadata: message.metadata,
-      created_at: message.created_at
+      created_at: message.created_at,
+      dm_recipient_id: message.dm_recipient_id || null
     };
     // Broadcast to channel subscribers
     this.broadcast('chat:message', payload, { channel: message.channel_id });

@@ -2122,6 +2122,9 @@ async function createOrGetDmRoute(request, reply) {
     WHERE c.id = ?
   `).get(id);
 
+  // Notify connected agents about the new DM channel
+  wsManager.emitChannelCreated(newChannel);
+
   reply.code(201);
   return {
     channel: {
