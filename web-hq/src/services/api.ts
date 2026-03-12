@@ -185,6 +185,10 @@ export const tasksApi = {
   // Delete task
   delete: (taskId: string) =>
     fetchApi(`/api/tasks/${taskId}`, { method: 'DELETE' }),
+
+  // Add comment to task
+  addComment: (taskId: string, content: string) =>
+    fetchApi(`/api/tasks/${taskId}/comments`, { method: 'POST', body: JSON.stringify({ content }) }),
 };
 
 // Costs API

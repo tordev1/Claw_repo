@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard';
 import Projects from './pages/Projects';
 import ProjectDetail from './pages/ProjectDetail';
 import Tasks from './pages/Tasks';
+import TaskDetail from './pages/TaskDetail';
 import Costs from './pages/Costs';
 import TokenDashboard from './pages/TokenDashboard';
 import { ToastContainer, toast } from './components/Toast';
@@ -192,6 +193,7 @@ function App() {
             }
           />
           <Route path="/tasks" element={<Tasks />} />
+          <Route path="/tasks/:id" element={<TaskDetail />} />
           <Route path="/costs" element={<Costs />} />
           <Route path="/tokens" element={<TokenDashboard />} />
           <Route path="/activity" element={<Activity />} />

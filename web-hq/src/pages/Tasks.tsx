@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { tasksApi, projectsApi } from '../services/api';
 import { Plus, Loader2, LayoutGrid, List } from 'lucide-react';
 import TaskCreationForm from '../components/TaskCreationForm';
@@ -11,6 +12,7 @@ const STATUS_COLOR: Record<string, string> = { pending: '#faa81a', running: '#81
 const PRI_COLOR: Record<string, string> = { critical: '#ef4444', high: '#f97316', medium: '#faa81a', low: '#64748b' };
 
 export default function Tasks() {
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,7 +47,7 @@ export default function Tasks() {
   const mono: React.CSSProperties = { fontFamily: 'var(--font-mono)' };
 
   const TaskCard = ({ task }: { task: Task }) => (
-    <div style={{ background: 'var(--ink-3)', border: '1px solid var(--ink-4)', borderLeft: `3px solid ${PRI_COLOR[task.priority] || 'var(--ink-4)'}`, borderRadius: 2, padding: '10px 12px', marginBottom: 6, cursor: 'pointer', transition: 'border-color 150ms' }}>
+    <div onClick={() => navigate('/tasks/' + task.id)} style={{ background: 'var(--ink-3)', border: '1px solid var(--ink-4)', borderLeft: `3px solid ${PRI_COLOR[task.priority] || 'var(--ink-4)'}`, borderRadius: 2, padding: '10px 12px', marginBottom: 6, cursor: 'pointer', transition: 'border-color 150ms' }}>
       <div style={{ ...mono, fontSize: 12, color: 'var(--text-hi)', marginBottom: 6, lineHeight: 1.4 }}>{task.title}</div>
       <div className="flex items-center justify-between">
         <span style={{ ...mono, fontSize: 9, color: PRI_COLOR[task.priority] || 'var(--text-lo)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{task.priority || '—'}</span>
@@ -112,7 +114,7 @@ export default function Tasks() {
               <thead><tr><th>Title</th><th>Status</th><th>Priority</th><th>Assignee</th></tr></thead>
               <tbody>
                 {tasks.map(t => (
-                  <tr key={t.id}>
+                  <tr key={t.id} onClick={() => navigate('/tasks/' + t.id)} style={{ cursor: 'pointer' }}>
                     <td style={{ color: 'var(--text-hi)' }}>{t.title}</td>
                     <td><span style={{ color: STATUS_COLOR[t.status || 'pending'], ...mono, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{STATUS_LABEL[t.status || 'pending']}</span></td>
                     <td><span style={{ color: PRI_COLOR[t.priority] || 'var(--text-lo)', ...mono, fontSize: 10, textTransform: 'uppercase' }}>{t.priority || '—'}</span></td>

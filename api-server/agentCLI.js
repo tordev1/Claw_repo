@@ -188,6 +188,63 @@ function isMentioned(content) {
            lower.includes(`@${AGENT_NAME.toLowerCase()}`);
 }
 
+// ── LLM chat reply ────────────────────────────────────────────────────────────
+function callLLM(messages) {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) return Promise.resolve(null);
+
+    return new Promise(resolve => {
+        const body = JSON.stringify({
+            model: 'anthropic/claude-haiku-4-5-20251001',
+            messages,
+            max_tokens: 400,
+            temperature: 0.8,
+        });
+        const opts = {
+            hostname: 'openrouter.ai',
+            path: '/api/v1/chat/completions',
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(body),
+                'HTTP-Referer': 'https://project-claw.local',
+                'X-Title': 'PROJECT-CLAW',
+            },
+        };
+        const r = https.request(opts, res => {
+            let data = '';
+            res.on('data', c => data += c);
+            res.on('end', () => {
+                try { resolve(JSON.parse(data).choices?.[0]?.message?.content || null); }
+                catch { resolve(null); }
+            });
+        });
+        r.on('error', () => resolve(null));
+        r.write(body);
+        r.end();
+    });
+}
+
+function buildChatPrompt(taskMemory) {
+    const typeLabel = AGENT_TYPE === 'pm' ? 'Project Manager' : AGENT_TYPE === 'rnd' ? 'R&D Researcher' : 'Worker';
+    const tasks = [...taskMemory.values()];
+    const taskList = tasks.length === 0
+        ? 'No tasks currently assigned.'
+        : tasks.map(t => {
+            const proj = t.project ? ` [${t.project}]` : '';
+            const desc = t.description ? ` — ${t.description.substring(0, 100)}` : '';
+            return `• [${(t.status || 'pending').toUpperCase()}]${proj} ${t.title}${desc}`;
+          }).join('\n');
+
+    return `You are ${AGENT_NAME} (@${AGENT_HANDLE}), a ${typeLabel} AI agent in PROJECT-CLAW.
+
+Current tasks:
+${taskList}
+
+Reply as ${AGENT_NAME} — naturally, concisely (2–4 sentences). Stay in character as an AI agent actively working on the above tasks. Reference your tasks when relevant.`;
+}
+
 // ── Task handling ─────────────────────────────────────────────────────────────
 async function handleTask(data, agentId, userToken) {
     const id = data.task_id || data.id;
@@ -307,6 +364,7 @@ async function main() {
     const activeTasks = new Set();
     const repliedMessages = new Set();       // dedupe by message ID
     const channelCooldown = new Map();       // channel → last-reply timestamp
+    const taskMemory = new Map();            // taskId → { id, title, status, description, project }
 
     wsConnect(agentId, userToken, async msg => {
         const ev = msg.event || msg.type;
@@ -316,8 +374,30 @@ async function main() {
             // Accept tasks assigned to this specific agent
             const tid = data?.task_id || data?.id;
             if (tid && data?.agent_id === agentId && !activeTasks.has(tid)) {
+                // Remember task for chat context
+                taskMemory.set(tid, {
+                    id: tid,
+                    title: data.task_title || data.title || tid,
+                    status: 'pending',
+                    description: data.description || null,
+                    project: data.project_name || null,
+                });
                 activeTasks.add(tid);
-                handleTask(data, agentId, userToken).finally(() => activeTasks.delete(tid));
+                handleTask(data, agentId, userToken)
+                    .then(() => {
+                        if (taskMemory.has(tid)) taskMemory.get(tid).status = 'completed';
+                    })
+                    .catch(() => {
+                        if (taskMemory.has(tid)) taskMemory.get(tid).status = 'failed';
+                    })
+                    .finally(() => activeTasks.delete(tid));
+            }
+        }
+
+        if (ev === 'task:completed' || ev === 'task:failed' || ev === 'task:cancelled') {
+            const tid = data?.task_id || data?.id;
+            if (tid && taskMemory.has(tid)) {
+                taskMemory.get(tid).status = ev.split(':')[1]; // 'completed' | 'failed' | 'cancelled'
             }
         }
 
@@ -326,7 +406,7 @@ async function main() {
         }
 
         if (ev === 'chat:message' || ev === 'message:new') {
-            const isMine = data?.sender_id === agentId || data?.sender_type === 'agent' && data?.sender_id === agentId;
+            const isMine = data?.sender_id === agentId || (data?.sender_type === 'agent' && data?.sender_id === agentId);
             const msgId = data?.id || data?.message_id;
 
             // Skip own messages and already-handled messages
@@ -335,11 +415,37 @@ async function main() {
             if (data?.content) {
                 const sender = data?.sender_name || '?';
                 const channelId = data?.channel_id;
+                const isDM = data?.channel_type === 'dm';
+                const mentioned = isMentioned(data.content);
+
                 log('MSG', `💬 [#${data?.channel_name || channelId}] ${sender}: ${data.content}`, C.C);
 
-                // Track message IDs to prevent duplicate processing
                 if (msgId) repliedMessages.add(msgId);
                 if (repliedMessages.size > 500) repliedMessages.clear();
+
+                // Reply in DMs and @mentions
+                if ((isDM || mentioned) && channelId) {
+                    const now = Date.now();
+                    const lastReply = channelCooldown.get(channelId) || 0;
+                    if (now - lastReply < 3000) return;
+                    channelCooldown.set(channelId, now);
+
+                    const systemPrompt = buildChatPrompt(taskMemory);
+                    const messages = [
+                        { role: 'system', content: systemPrompt },
+                        { role: 'user',   content: `${sender}: ${data.content}` },
+                    ];
+
+                    callLLM(messages).then(reply => {
+                        const text = reply || (
+                            taskMemory.size > 0
+                                ? `I'm currently working on ${taskMemory.size} task(s). (Set OPENROUTER_API_KEY for AI replies.)`
+                                : `Online and standing by. (Set OPENROUTER_API_KEY for AI replies.)`
+                        );
+                        log('CHAT', `↩ Replying in #${data?.channel_name || channelId}`, C.G);
+                        sendMessage(channelId, text, userToken, agentId);
+                    });
+                }
             }
         }
 
