@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Bell, Check, CheckCheck, X } from 'lucide-react';
 import { useNotificationStore, type Notification } from '../store/notificationStore';
+import { userSession } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 
 const M: React.CSSProperties = { fontFamily: 'var(--font-mono)' };
@@ -69,6 +70,7 @@ export default function NotificationBell() {
 
     useEffect(() => {
         setMounted(true);
+        if (!userSession.isLoggedIn()) return;
         fetchNotifications();
         const interval = setInterval(fetchNotifications, 30000);
         return () => clearInterval(interval);
