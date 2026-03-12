@@ -193,22 +193,43 @@ async function handleTask(data, agentId, userToken) {
     const id = data.task_id || data.id;
     const title = data.task_title || data.title || id;
     log('TASK', `📋 Assigned: "${title}"`, C.A);
-    await sleep(1000);
+    await sleep(800);
 
+    // Accept
     const acc = await req('POST', `/api/tasks/${id}/accept`, {}, userToken);
     if (acc.status === 200) log('TASK', '✓ Accepted', C.G);
     else { log('TASK', `Accept failed (${acc.status}): ${JSON.stringify(acc.body)}`, C.R); return; }
 
-    await sleep(500);
-    await req('POST', `/api/tasks/${id}/start`, {}, userToken);
-    log('TASK', '✓ Started — simulating 5s of work...', C.C);
-    await sleep(5000);
+    await sleep(400);
 
-    const done = await req('POST', `/api/tasks/${id}/complete`, {
-        result: `"${title}" completed by agent ${AGENT_NAME}.`
-    }, userToken);
-    if (done.status === 200) log('TASK', `✅ Completed: "${title}"`, C.G);
-    else log('TASK', `Complete failed: ${JSON.stringify(done.body)}`, C.R);
+    // Start
+    const startRes = await req('POST', `/api/tasks/${id}/start`, {}, userToken);
+    if (startRes.status !== 200) {
+        log('TASK', `Start failed (${startRes.status}): ${JSON.stringify(startRes.body)}`, C.R);
+        return;
+    }
+    log('TASK', `✓ Started — calling AI executor...`, C.C);
+
+    // Execute with real AI (server handles LLM call, cost tracking, result posting)
+    const execRes = await req('POST', `/api/tasks/${id}/execute`, {}, userToken);
+
+    if (execRes.status === 200) {
+        const { model, tokens, skipped, cost_usd, result_preview } = execRes.body;
+        if (skipped) {
+            log('TASK', `⚠  No OPENROUTER_API_KEY — execution simulated`, C.Y);
+            log('TASK', `   Set OPENROUTER_API_KEY in api-server/.env for real AI`, C.Y);
+        } else {
+            const tokStr   = tokens ? `${tokens.total} tokens` : '';
+            const costStr  = cost_usd ? ` · $${cost_usd.toFixed(6)}` : '';
+            log('TASK', `✅ Completed [${model}] ${tokStr}${costStr}`, C.G);
+            if (result_preview) {
+                const lines = result_preview.substring(0, 120).replace(/\n/g, ' ');
+                log('TASK', `   → ${lines}...`, C.X);
+            }
+        }
+    } else {
+        log('TASK', `Execute failed (${execRes.status}): ${JSON.stringify(execRes.body)}`, C.R);
+    }
 }
 
 // ── Notification poll ─────────────────────────────────────────────────────────

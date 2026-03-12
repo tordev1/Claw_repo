@@ -95,9 +95,18 @@ pending (created) → accepted (agent acks) → running (agent starts) → compl
 
 - `acceptTask` — sets `accepted_at` only, does not change `status`
 - `startTask` — requires `status === 'pending'`, sets `status = 'running'`
-- `completeTask` — requires `status === 'running'`, sets `status = 'completed'`
-- All three routes have admin bypass: `task.agent_id !== userId && user.role !== 'admin'`
+- `completeTask` — requires `status === 'running'`, sets `status = 'completed'` (manual/legacy)
+- `executeTaskRoute` (`POST /api/tasks/:id/execute`) — requires `running`, calls OpenRouter LLM via `ai-executor.js`, stores result, tracks cost in `cost_records`, posts to project channel, marks `completed`
+- All routes have admin bypass: `task.agent_id !== userId && user.role !== 'admin'`
 - To assign a task to an agent, that agent must first be assigned to the project via `agent_projects`
+
+### AI Executor (`src/ai-executor.js`)
+
+Standalone LLM module. Requires `OPENROUTER_API_KEY` in env.
+- `executeTask(task, agent, project)` → `{ result, model, tokens, cost, skipped }`
+- Type-aware system prompts: PM (planning), Worker (technical/code), R&D (research)
+- Model: `agent.current_model` → type default (`claude-haiku-4-5` for PM/Worker, `claude-sonnet-4-6` for R&D)
+- No key → `skipped: true`, simulated result, no crash
 - **Note**: The frontend `Task` TypeScript interface in `api.ts` lists statuses `draft | assigned | in_progress` that do not exist in the backend DB. The backend is authoritative: `pending`, `running`, `completed`, `failed`, `cancelled`.
 
 ### WebSocket

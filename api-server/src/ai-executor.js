@@ -1,0 +1,186 @@
+/**
+ * AI Executor — calls OpenRouter LLM to actually process tasks
+ * Used by POST /api/tasks/:id/execute
+ */
+
+const https = require('https');
+
+const OPENROUTER_HOST = 'openrouter.ai';
+
+// Default model per agent type — cheap & fast by default
+const DEFAULT_MODELS = {
+  pm:     'anthropic/claude-haiku-4-5-20251001',
+  rnd:    'anthropic/claude-sonnet-4-6',
+  worker: 'anthropic/claude-haiku-4-5-20251001',
+};
+
+// Cost per 1M tokens (fallback pricing)
+const TOKEN_PRICING = {
+  'anthropic/claude-haiku-4-5-20251001': { prompt: 0.80,  completion: 4.0  },
+  'anthropic/claude-sonnet-4-6':         { prompt: 3.00,  completion: 15.0 },
+  'anthropic/claude-opus-4-6':           { prompt: 15.00, completion: 75.0 },
+  'openai/gpt-4o':                       { prompt: 2.50,  completion: 10.0 },
+  'openai/gpt-4o-mini':                  { prompt: 0.15,  completion: 0.60 },
+  'openai/gpt-4.1':                      { prompt: 2.00,  completion: 8.0  },
+  'moonshot/kimi-k2-turbo':              { prompt: 0.30,  completion: 1.20 },
+};
+
+// ── HTTP call to OpenRouter ───────────────────────────────────────────────────
+function callOpenRouter(messages, model, apiKey) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      model,
+      messages,
+      max_tokens: 1500,
+      temperature: 0.7,
+    });
+
+    const opts = {
+      hostname: OPENROUTER_HOST,
+      path: '/api/v1/chat/completions',
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        'HTTP-Referer': 'https://project-claw.local',
+        'X-Title': 'PROJECT-CLAW',
+      },
+    };
+
+    const reqHttp = https.request(opts, res => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve(parsed);
+          } else {
+            reject(new Error(parsed.error?.message || `HTTP ${res.statusCode}: ${data.substring(0, 200)}`));
+          }
+        } catch (e) {
+          reject(new Error(`Parse error: ${e.message} — raw: ${data.substring(0, 100)}`));
+        }
+      });
+    });
+
+    reqHttp.on('error', reject);
+    reqHttp.write(body);
+    reqHttp.end();
+  });
+}
+
+// ── System prompt per agent type ─────────────────────────────────────────────
+function buildSystemPrompt(agent, project) {
+  const type = agent.agent_type || 'worker';
+  const skills = (() => {
+    try { return JSON.parse(agent.skills || '[]'); } catch { return []; }
+  })();
+
+  const projectCtx = project
+    ? `\nProject: ${project.name}${project.description ? `\nContext: ${project.description}` : ''}`
+    : '';
+
+  if (type === 'pm') {
+    return `You are ${agent.name}, a Project Manager AI agent${agent.current_mode ? ` running in ${agent.current_mode.replace(/_/g, ' ').toUpperCase()} mode` : ''}.
+
+Your responsibilities: Break work into clear deliverables, identify dependencies, define acceptance criteria, coordinate team effort.${projectCtx}
+
+Respond with structured, actionable output. Use markdown. Be concise and specific — not theoretical.`;
+  }
+
+  if (type === 'rnd') {
+    const division = (agent.rnd_division || 'general research').replace(/_/g, ' ');
+    return `You are ${agent.name}, an R&D Research agent specializing in ${division}.
+
+Your responsibilities: Research emerging solutions, evaluate technologies, surface insights and recommendations.${projectCtx}
+
+Respond with findings, analysis, and concrete recommendations. Cite specific technologies, tools, or approaches. Use markdown.`;
+  }
+
+  // Worker
+  const roleLabel = (agent.role || 'developer').replace(/_/g, ' ');
+  const skillsStr = skills.length ? ` Expert in: ${skills.slice(0, 5).join(', ')}.` : '';
+  return `You are ${agent.name}, a ${roleLabel} AI agent.${skillsStr}
+
+Your responsibilities: Implement features, write code, solve technical problems, deliver working solutions.${projectCtx}
+
+Respond with concrete technical output — code, configuration, implementation steps, or technical specs. Use markdown with code blocks where relevant.`;
+}
+
+// ── Select model ──────────────────────────────────────────────────────────────
+function selectModel(agent) {
+  if (agent.current_model) return agent.current_model;
+  return DEFAULT_MODELS[agent.agent_type || 'worker'] || DEFAULT_MODELS.worker;
+}
+
+// ── Calculate cost from token usage ──────────────────────────────────────────
+function estimateCost(model, promptTokens, completionTokens) {
+  const pricing = TOKEN_PRICING[model] || { prompt: 1.0, completion: 3.0 };
+  const promptCost      = (promptTokens     / 1_000_000) * pricing.prompt;
+  const completionCost  = (completionTokens / 1_000_000) * pricing.completion;
+  return {
+    prompt_cost:     promptCost,
+    completion_cost: completionCost,
+    total_cost:      promptCost + completionCost,
+    pricing,
+  };
+}
+
+// ── Main executor ─────────────────────────────────────────────────────────────
+async function executeTask(task, agent, project) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+
+  // Graceful degradation — no key means simulated result
+  if (!apiKey) {
+    return {
+      success: true,
+      skipped: true,
+      result: `[SIMULATED — no OPENROUTER_API_KEY]\n\n**${agent.name}** completed task: _${task.title}_\n\nTo enable real AI execution, set OPENROUTER_API_KEY in api-server/.env`,
+      model: null,
+      tokens: null,
+      cost: null,
+    };
+  }
+
+  const model = selectModel(agent);
+  const systemPrompt = buildSystemPrompt(agent, project);
+  const userMessage = [
+    `Complete this task:`,
+    ``,
+    `**Title:** ${task.title}`,
+    task.description ? `**Description:** ${task.description}` : null,
+    `**Priority:** ${task.priority || 'normal'}`,
+    ``,
+    `Deliver the actual output. Be specific and actionable.`,
+  ].filter(Boolean).join('\n');
+
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user',   content: userMessage  },
+  ];
+
+  const response = await callOpenRouter(messages, model, apiKey);
+
+  const content = response.choices?.[0]?.message?.content || '(no output)';
+  const usage   = response.usage || {};
+  const promptTokens     = usage.prompt_tokens     || 0;
+  const completionTokens = usage.completion_tokens || 0;
+  const cost = estimateCost(model, promptTokens, completionTokens);
+
+  return {
+    success:  true,
+    skipped:  false,
+    result:   content,
+    model,
+    tokens: {
+      prompt:     promptTokens,
+      completion: completionTokens,
+      total:      promptTokens + completionTokens,
+    },
+    cost,
+  };
+}
+
+module.exports = { executeTask, callOpenRouter, buildSystemPrompt, selectModel, estimateCost, TOKEN_PRICING };

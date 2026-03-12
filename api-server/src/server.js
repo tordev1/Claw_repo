@@ -213,6 +213,9 @@ async function buildServer() {
   // Complete task
   fastify.post('/api/tasks/:id/complete', { preHandler: authMiddleware }, routes.completeTask);
 
+  // Execute task with AI
+  fastify.post('/api/tasks/:id/execute', { preHandler: authMiddleware }, routes.executeTaskRoute);
+
   // Cancel task
   fastify.post('/api/tasks/:id/cancel', { preHandler: authMiddleware }, routes.cancelTask);
 

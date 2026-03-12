@@ -1076,6 +1076,134 @@ async function completeTask(request, reply) {
   };
 }
 
+// POST /api/tasks/:id/execute - Execute task with AI (agent calls this when task is running)
+async function executeTaskRoute(request, reply) {
+  const db = getDb();
+  const { id } = request.params;
+  const user = request.user;
+
+  const task = db.prepare(`
+    SELECT t.*, p.name as project_name, p.description as project_description
+    FROM tasks t LEFT JOIN projects p ON t.project_id = p.id
+    WHERE t.id = ?
+  `).get(id);
+
+  if (!task) { reply.code(404); return { error: 'Task not found' }; }
+  if (task.status !== 'running') {
+    reply.code(400);
+    return { error: `Task must be running to execute (current: ${task.status})` };
+  }
+
+  const agent = db.prepare('SELECT * FROM manager_agents WHERE id = ?').get(task.agent_id);
+  if (!agent) { reply.code(400); return { error: 'No agent assigned to this task' }; }
+
+  // Auth: admin, or the assigned agent's session
+  if (user?.role !== 'admin' && user?.id !== task.agent_id) {
+    reply.code(403);
+    return { error: 'Not authorized' };
+  }
+
+  const project = { id: task.project_id, name: task.project_name, description: task.project_description };
+
+  try {
+    const { executeTask } = require('./ai-executor');
+    const execResult = await executeTask(task, agent, project);
+
+    const now = new Date().toISOString();
+    const resultText = execResult.result;
+
+    // Complete the task with real AI result
+    db.prepare(`UPDATE tasks SET status='completed', result=?, completed_at=?, updated_at=? WHERE id=?`)
+      .run(resultText, now, now, id);
+
+    // Track token cost in cost_records
+    if (!execResult.skipped && execResult.tokens && execResult.cost) {
+      try {
+        db.prepare(`
+          INSERT INTO cost_records (id, project_id, user_id, model, provider,
+            prompt_tokens, completion_tokens, total_tokens, cost_usd,
+            cost_per_1k_prompt, cost_per_1k_completion, request_id, is_cached, metadata, recorded_at)
+          VALUES (?, ?, ?, ?, 'openrouter', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+        `).run(
+          generateId(), task.project_id, agent.id, execResult.model,
+          execResult.tokens.prompt, execResult.tokens.completion, execResult.tokens.total,
+          execResult.cost.total_cost,
+          execResult.cost.pricing.prompt / 1000,
+          execResult.cost.pricing.completion / 1000,
+          generateId(),
+          JSON.stringify({ task_id: id, task_title: task.title, agent_id: agent.id }),
+          now
+        );
+      } catch (e) { console.error('[execute] cost tracking error:', e.message); }
+    }
+
+    // WS broadcast
+    const wsManager = require('./websocket');
+    wsManager.emitTaskCompleted(task.project_id, {
+      task_id: id,
+      task_title: task.title,
+      project_id: task.project_id,
+      project_name: task.project_name,
+      agent_id: agent.id,
+      agent_name: agent.name,
+      completed_at: now,
+    });
+
+    // Notify assigner
+    if (task.assigned_by) {
+      notifyTaskCompleted(
+        { id, title: task.title, project_id: task.project_id, assigned_by: task.assigned_by },
+        { id: task.project_id, name: task.project_name },
+        agent.id, resultText.substring(0, 200)
+      ).catch(() => {});
+    }
+
+    // Post result to project channel
+    try {
+      const { sendChannelMessage } = require('./chat');
+      const channel = db.prepare('SELECT id FROM channels WHERE project_id = ? AND type = ?')
+        .get(task.project_id, 'project');
+      if (channel) {
+        const preview = resultText.length > 600 ? resultText.substring(0, 600) + '\n\n_[truncated]_' : resultText;
+        await sendChannelMessage(null, channel.id,
+          `✅ **Task Completed: ${task.title}**\n\n${preview}`,
+          { agent_id: agent.id }
+        );
+      }
+    } catch (e) { console.error('[execute] channel post error:', e.message); }
+
+    // Activity history
+    try {
+      db.prepare(`
+        INSERT INTO activity_history (event_type, action, entity_id, entity_title, project_id, project_name, agent_id, agent_name, user_id, metadata, created_at)
+        VALUES ('task', 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, task.title, task.project_id, task.project_name, agent.id, agent.name, user?.id,
+        JSON.stringify({ model: execResult.model, tokens: execResult.tokens, ai_executed: !execResult.skipped }),
+        now
+      );
+    } catch (e) { /* ignore */ }
+
+    return {
+      task_id: id,
+      status: 'completed',
+      model: execResult.model,
+      tokens: execResult.tokens,
+      cost_usd: execResult.cost?.total_cost ?? null,
+      skipped: execResult.skipped,
+      result_preview: resultText.substring(0, 300),
+    };
+
+  } catch (err) {
+    console.error('[execute] AI execution error:', err.message);
+    // Mark task failed
+    const now = new Date().toISOString();
+    db.prepare(`UPDATE tasks SET status='failed', result=?, updated_at=? WHERE id=?`)
+      .run(`AI execution failed: ${err.message}`, now, id);
+    reply.code(500);
+    return { error: err.message };
+  }
+}
+
 // POST /api/tasks/:id/cancel - Cancel task
 async function cancelTask(request, reply) {
   const db = getDb();
@@ -4269,6 +4397,7 @@ module.exports = {
   rejectTask,
   startTask,
   completeTask,
+  executeTaskRoute,
   cancelTask,
   addTaskComment,
   getAgentTasks,
