@@ -630,6 +630,24 @@ class SQLiteAdapter {
       CREATE INDEX IF NOT EXISTS idx_task_comments_created ON task_comments(created_at);
     `);
 
+    // Task updates table
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS task_updates (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        agent_id TEXT REFERENCES manager_agents(id) ON DELETE SET NULL,
+        user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+        update_type TEXT NOT NULL DEFAULT 'progress' CHECK (update_type IN ('progress','question','blocker','completion','system')),
+        content TEXT NOT NULL,
+        is_public INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+    `);
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_task_updates_task ON task_updates(task_id);
+      CREATE INDEX IF NOT EXISTS idx_task_updates_created ON task_updates(created_at);
+    `);
+
     // Task assignment history table
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS task_assignment_history (

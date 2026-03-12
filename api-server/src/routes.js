@@ -1333,6 +1333,82 @@ async function addTaskComment(request, reply) {
   };
 }
 
+// GET /api/tasks/:id/updates - Get updates for a task
+async function getTaskUpdates(request, reply) {
+  const db = getDb();
+  const { id } = request.params;
+  const { limit = 50, offset = 0 } = request.query;
+
+  const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(id);
+  if (!task) {
+    reply.code(404);
+    return { error: 'Task not found' };
+  }
+
+  const updates = db.prepare(`
+    SELECT
+      tu.*,
+      ma.name as agent_name,
+      ma.handle as agent_handle,
+      u.name as user_name
+    FROM task_updates tu
+    LEFT JOIN manager_agents ma ON tu.agent_id = ma.id
+    LEFT JOIN users u ON tu.user_id = u.id
+    WHERE tu.task_id = ?
+    ORDER BY tu.created_at ASC
+    LIMIT ? OFFSET ?
+  `).all(id, parseInt(limit), parseInt(offset));
+
+  return { updates };
+}
+
+// POST /api/tasks/:id/updates - Add an update to a task
+async function addTaskUpdate(request, reply) {
+  const db = getDb();
+  const { id } = request.params;
+  const userId = request.user?.id;
+  const { content, update_type = 'progress', is_public = true } = request.body;
+
+  if (!content || !content.trim()) {
+    reply.code(400);
+    return { error: 'Content is required' };
+  }
+
+  const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(id);
+  if (!task) {
+    reply.code(404);
+    return { error: 'Task not found' };
+  }
+
+  const validTypes = ['progress', 'question', 'blocker', 'completion', 'system'];
+  if (!validTypes.includes(update_type)) {
+    reply.code(400);
+    return { error: `update_type must be one of: ${validTypes.join(', ')}` };
+  }
+
+  const updateId = generateId();
+  const now = new Date().toISOString();
+
+  // Determine if author is an agent or a user
+  const agent = db.prepare('SELECT id FROM manager_agents WHERE id = ?').get(userId);
+
+  db.prepare(`
+    INSERT INTO task_updates (id, task_id, agent_id, user_id, update_type, content, is_public, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(updateId, id, agent ? userId : null, agent ? null : userId, update_type, content.trim(), is_public ? 1 : 0, now);
+
+  const update = db.prepare(`
+    SELECT tu.*, ma.name as agent_name, ma.handle as agent_handle, u.name as user_name
+    FROM task_updates tu
+    LEFT JOIN manager_agents ma ON tu.agent_id = ma.id
+    LEFT JOIN users u ON tu.user_id = u.id
+    WHERE tu.id = ?
+  `).get(updateId);
+
+  reply.code(201);
+  return { update };
+}
+
 // GET /api/agents/:id/tasks - Get tasks assigned to an agent
 async function getAgentTasks(request, reply) {
   const db = getDb();
@@ -4464,6 +4540,8 @@ module.exports = {
   executeTaskRoute,
   cancelTask,
   addTaskComment,
+  getTaskUpdates,
+  addTaskUpdate,
   getAgentTasks,
   getMyTasks,
   searchTasks,

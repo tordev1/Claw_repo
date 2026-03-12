@@ -233,6 +233,23 @@ async function buildServer() {
     }
   }, routes.addTaskComment);
 
+  // Task updates
+  fastify.get('/api/tasks/:id/updates', { preHandler: authMiddleware }, routes.getTaskUpdates);
+  fastify.post('/api/tasks/:id/updates', {
+    preHandler: authMiddleware,
+    schema: {
+      body: {
+        type: 'object',
+        required: ['content'],
+        properties: {
+          content: { type: 'string', minLength: 1 },
+          update_type: { type: 'string', enum: ['progress', 'question', 'blocker', 'completion', 'system'] },
+          is_public: { type: 'boolean' }
+        }
+      }
+    }
+  }, routes.addTaskUpdate);
+
   // Get agent tasks
   fastify.get('/api/agents/:id/tasks', { preHandler: authMiddleware }, routes.getAgentTasks);
 
