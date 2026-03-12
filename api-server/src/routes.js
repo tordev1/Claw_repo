@@ -2899,6 +2899,20 @@ async function assignAgentToProjectRouteV2(request, reply) {
       }
     }
 
+    // PM Delegation: assign generated tasks to worker agents on this project
+    let delegatedAssignments = [];
+    if (generatedTasks.length > 0) {
+      try {
+        const { delegateTasksToWorkers } = require('./pm-delegation');
+        delegatedAssignments = delegateTasksToWorkers(id, generatedTasks, agent_id, db, wsManager);
+        if (delegatedAssignments.length) {
+          console.log(`[PM Delegation] Assigned ${delegatedAssignments.length} tasks to workers`);
+        }
+      } catch (delErr) {
+        console.error('[PM Delegation] Error delegating tasks:', delErr.message);
+      }
+    }
+
     reply.code(201);
     return {
       assignment_id: assignmentId,
@@ -2908,7 +2922,8 @@ async function assignAgentToProjectRouteV2(request, reply) {
       role,
       assigned_by: user.id,
       assigned_at: now,
-      generated_tasks: generatedTasks.length > 0 ? generatedTasks : undefined
+      generated_tasks: generatedTasks.length > 0 ? generatedTasks : undefined,
+      delegated_tasks: delegatedAssignments.length > 0 ? delegatedAssignments : undefined,
     };
   } catch (err) {
     if (err.message.includes('UNIQUE constraint failed')) {
