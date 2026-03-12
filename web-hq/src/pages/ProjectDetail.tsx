@@ -65,14 +65,15 @@ interface ProjectAgent {
 const getStatusBg = (status: string) => {
   switch (status) {
     case 'active':
-    case 'done':
+    case 'completed':
       return 'bg-green-500/20 text-green-400';
     case 'standby':
-    case 'in_progress':
-    case 'review':
+    case 'running':
+    case 'pending':
       return 'bg-yellow-500/20 text-yellow-400';
     case 'offline':
-    case 'backlog':
+    case 'failed':
+    case 'cancelled':
       return 'bg-red-500/20 text-red-400';
     default:
       return 'bg-slate-700 text-slate-400';
@@ -82,14 +83,15 @@ const getStatusBg = (status: string) => {
 const getStatusColor = (status: string) => {
   switch (status) {
     case 'active':
-    case 'done':
+    case 'completed':
       return 'text-green-400';
     case 'standby':
-    case 'in_progress':
-    case 'review':
+    case 'running':
+    case 'pending':
       return 'text-yellow-400';
     case 'offline':
-    case 'backlog':
+    case 'failed':
+    case 'cancelled':
       return 'text-red-400';
     default:
       return 'text-slate-400';
@@ -259,8 +261,8 @@ export default function ProjectDetail() {
     );
   }
 
-  const activeTasks = projectTasks.filter(t => t.status === 'in_progress');
-  const completedTasks = projectTasks.filter(t => t.status === 'done');
+  const activeTasks = projectTasks.filter(t => t.status === 'running');
+  const completedTasks = projectTasks.filter(t => t.status === 'completed');
 
   return (
     <div className="space-y-4 animate-fade-up">

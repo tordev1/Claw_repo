@@ -30,6 +30,7 @@ const getNotificationIcon = (type: string) => {
         project_removed: '#ef4444',
         role_updated: '#6366f1',
         approved: '#10b981',
+        agent_registered: '#22d3ee',
         dm_message: '#ec4899',
         budget_alert: '#f97316',
         default: '#6b7280'

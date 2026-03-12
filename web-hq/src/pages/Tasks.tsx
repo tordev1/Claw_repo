@@ -4,9 +4,9 @@ import { Plus, Loader2, LayoutGrid, List } from 'lucide-react';
 
 interface Task { id: string; title: string; status: string; priority: string; assignee?: string; projectId?: string; }
 
-const STATUS_COLS = ['backlog', 'in_progress', 'in_review', 'done'];
-const STATUS_LABEL: Record<string, string> = { backlog: 'BACKLOG', in_progress: 'IN PROGRESS', in_review: 'IN REVIEW', done: 'DONE' };
-const STATUS_COLOR: Record<string, string> = { backlog: 'var(--text-lo)', in_progress: '#faa81a', in_review: '#60a5fa', done: '#10b981' };
+const STATUS_COLS = ['pending', 'running', 'completed', 'failed', 'cancelled'];
+const STATUS_LABEL: Record<string, string> = { pending: 'PENDING', running: 'RUNNING', completed: 'COMPLETED', failed: 'FAILED', cancelled: 'CANCELLED' };
+const STATUS_COLOR: Record<string, string> = { pending: '#faa81a', running: '#818cf8', completed: '#10b981', failed: '#f97316', cancelled: '#ef4444' };
 const PRI_COLOR: Record<string, string> = { critical: '#ef4444', high: '#f97316', medium: '#faa81a', low: '#64748b' };
 
 export default function Tasks() {
@@ -85,7 +85,7 @@ export default function Tasks() {
       ) : view === 'kanban' ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {STATUS_COLS.map(col => {
-            const colTasks = tasks.filter(t => (t.status || 'backlog') === col);
+            const colTasks = tasks.filter(t => (t.status || 'pending') === col);
             return (
               <div key={col}>
                 <div className="flex items-center justify-between mb-3" style={{ borderBottom: `2px solid ${STATUS_COLOR[col]}`, paddingBottom: 6 }}>
@@ -112,7 +112,7 @@ export default function Tasks() {
                 {tasks.map(t => (
                   <tr key={t.id}>
                     <td style={{ color: 'var(--text-hi)' }}>{t.title}</td>
-                    <td><span style={{ color: STATUS_COLOR[t.status || 'backlog'], ...mono, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{STATUS_LABEL[t.status || 'backlog']}</span></td>
+                    <td><span style={{ color: STATUS_COLOR[t.status || 'pending'], ...mono, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{STATUS_LABEL[t.status || 'pending']}</span></td>
                     <td><span style={{ color: PRI_COLOR[t.priority] || 'var(--text-lo)', ...mono, fontSize: 10, textTransform: 'uppercase' }}>{t.priority || '—'}</span></td>
                     <td style={{ color: 'var(--text-lo)' }}>{t.assignee ? '@' + t.assignee : '—'}</td>
                   </tr>

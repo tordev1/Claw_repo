@@ -53,61 +53,125 @@ export default function Dashboard() {
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
-      <Loader2 size={20} className="animate-spin" style={{ color: 'var(--amber)' }} />
-      <span className="ml-3" style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-mid)' }}>LOADING DASHBOARD...</span>
+      <Loader2 size={20} className="animate-spin" style={{ color: 'var(--cyan)' }} />
+      <span className="ml-3" style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-mid)', letterSpacing: '0.1em' }}>LOADING DASHBOARD...</span>
     </div>
   );
 
   return (
     <div className="space-y-6 animate-fade-up">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <div className="ops-section-header" style={{ marginBottom: 4 }}>Control Center</div>
-          <h1 style={{ fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text-hi)' }}>DASHBOARD</h1>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--cyan)', opacity: 0.7, marginBottom: 4 }}>// Control Center</div>
+          <h1 style={{ fontFamily: 'var(--font-mono)', fontSize: 20, fontWeight: 700, letterSpacing: '0.05em', color: 'var(--text-hi)', textShadow: '0 0 20px rgba(34,211,238,0.15)' }}>DASHBOARD</h1>
         </div>
         <div className="flex items-center gap-2">
-          {error && <div className="flex items-center gap-2" style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#ef4444' }}><AlertCircle size={12} />{error}<button onClick={load} style={{ color: 'var(--amber)', textDecoration: 'underline' }}>Retry</button></div>}
-          <button onClick={load} className="ops-btn"><Zap size={11} /> Refresh</button>
+          {error && (
+            <div className="flex items-center gap-2" style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#ef4444' }}>
+              <AlertCircle size={12} />{error}
+              <button onClick={load} style={{ color: 'var(--cyan)', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer' }}>Retry</button>
+            </div>
+          )}
+          <button onClick={load} className="ops-btn ops-btn-primary"><Zap size={11} /> Refresh</button>
         </div>
       </div>
 
+      {/* Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="ops-stat"><div className="flex items-center justify-between mb-3"><span className="ops-label">Agents</span><Bot size={13} style={{ color: 'var(--amber)' }} /></div><div className="ops-value">{stats.totalAgents}</div></div>
-        <div className="ops-stat"><div className="flex items-center justify-between mb-3"><span className="ops-label">Active Projects</span><FolderKanban size={13} style={{ color: '#10b981' }} /></div><div className="ops-value" style={{ color: '#10b981' }}>{stats.activeProjects}</div></div>
-        <div className="ops-stat"><div className="flex items-center justify-between mb-3"><span className="ops-label">Active Tasks</span><CheckSquare size={13} style={{ color: '#f59e0b' }} /></div><div className="ops-value" style={{ color: '#f59e0b' }}>{stats.totalTasks}</div></div>
-        <div className="ops-stat">
-          <div className="flex items-center justify-between mb-3"><span className="ops-label">Monthly Cost</span><DollarSign size={13} style={{ color: '#60a5fa' }} /></div>
-          <div className="ops-value" style={{ fontSize: '1.5rem' }}>${stats.monthlyCost.toFixed(2)}</div>
-          <div className="ops-bar-track" style={{ marginTop: 8 }}><div className="ops-bar-fill" style={{ width: Math.min((stats.monthlyCost / stats.monthlyBudget) * 100, 100) + '%' }} /></div>
-          <div className="flex justify-between mt-1" style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-lo)' }}><span>$0</span><span>${stats.monthlyBudget}</span></div>
+        {/* Agents */}
+        <div className="neon-card neon-card-cyan" style={{ padding: '1.1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--cyan)', opacity: 0.8 }}>Agents</span>
+            <Bot size={12} style={{ color: 'var(--cyan)', opacity: 0.6 }} />
+          </div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.8rem', fontWeight: 700, color: 'var(--text-hi)', lineHeight: 1, textShadow: '0 0 20px rgba(34,211,238,0.2)' }}>{stats.totalAgents}</div>
+        </div>
+
+        {/* Active Projects */}
+        <div className="neon-card" style={{ padding: '1.1rem', borderColor: 'rgba(16,185,129,0.15)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--green)', opacity: 0.8 }}>Projects</span>
+            <FolderKanban size={12} style={{ color: 'var(--green)', opacity: 0.6 }} />
+          </div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.8rem', fontWeight: 700, color: 'var(--green)', lineHeight: 1, textShadow: '0 0 20px rgba(16,185,129,0.3)' }}>{stats.activeProjects}</div>
+        </div>
+
+        {/* Active Tasks */}
+        <div className="neon-card neon-card-pm" style={{ padding: '1.1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--amber)', opacity: 0.8 }}>Tasks</span>
+            <CheckSquare size={12} style={{ color: 'var(--amber)', opacity: 0.6 }} />
+          </div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.8rem', fontWeight: 700, color: 'var(--amber)', lineHeight: 1, textShadow: '0 0 20px rgba(245,158,11,0.3)' }}>{stats.totalTasks}</div>
+        </div>
+
+        {/* Monthly Cost */}
+        <div className="neon-card neon-card-worker" style={{ padding: '1.1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--blue)', opacity: 0.8 }}>Monthly Cost</span>
+            <DollarSign size={12} style={{ color: 'var(--blue)', opacity: 0.6 }} />
+          </div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.4rem', fontWeight: 700, color: 'var(--blue)', lineHeight: 1, textShadow: '0 0 20px rgba(59,130,246,0.3)' }}>${stats.monthlyCost.toFixed(2)}</div>
+          <div className="ops-bar-track" style={{ marginTop: 10 }}>
+            <div className="ops-bar-fill" style={{ width: Math.min((stats.monthlyCost / stats.monthlyBudget) * 100, 100) + '%', background: 'linear-gradient(90deg, rgba(59,130,246,0.6), #3b82f6)', boxShadow: '0 0 8px rgba(59,130,246,0.5)' }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-lo)' }}>
+            <span>$0</span><span>${stats.monthlyBudget}</span>
+          </div>
         </div>
       </div>
 
+      {/* Machine Fleet */}
       <div>
         <div className="ops-section-header"><Server size={11} /> Mac Mini Fleet</div>
         {machines.length === 0 ? (
-          <div className="ops-panel p-8 text-center"><WifiOff size={24} className="mx-auto mb-3" style={{ color: 'var(--text-dim)' }} /><p style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-lo)' }}>No Mac Minis registered yet</p></div>
+          <div className="neon-card" style={{ padding: '2.5rem', textAlign: 'center' }}>
+            <WifiOff size={22} style={{ color: 'var(--text-dim)', margin: '0 auto 10px' }} />
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-lo)' }}>No machines registered yet</p>
+          </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {machines.map((m: any) => {
               const st = machineStatus(m);
               return (
-                <div key={m.id} className="ops-panel p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2"><span className={"ops-dot " + st.dot} /><span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600 }}>{m.hostname}</span></div>
-                    <div className="flex items-center gap-2">
-                      <span className={"ops-badge " + st.cls}>{st.label}</span>
-                      <button onClick={() => deleteMachine(m.id)} title="Delete machine" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 2 }} onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')} onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}>
-                        <Trash2 size={12} />
+                <div key={m.id} className="neon-card" style={{ padding: '1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span className={"ops-dot " + st.dot} />
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: 'var(--text-hi)' }}>{m.hostname}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span className={"ops-badge " + st.cls} style={{ fontSize: 9 }}>{st.label}</span>
+                      <button onClick={() => deleteMachine(m.id)} title="Delete"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', padding: 2, display: 'flex' }}
+                        onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
+                        onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-dim)')}>
+                        <Trash2 size={11} />
                       </button>
                     </div>
                   </div>
-                  <div className="space-y-1.5">
-                    {m.ip_address && <div className="flex justify-between"><span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-lo)', textTransform: 'uppercase' }}>IP</span><span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-mid)' }}>{m.ip_address}</span></div>}
-                    <div className="flex justify-between"><span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-lo)', textTransform: 'uppercase' }}>Agents</span><span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-mid)' }}>{m.agents?.length || 0}</span></div>
-                    <div className="flex justify-between"><span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-lo)', textTransform: 'uppercase' }}>Last Seen</span><span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-mid)' }}>{timeAgo(m.last_seen)}</span></div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    {m.ip_address && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-lo)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>IP</span>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--cyan)' }}>{m.ip_address}</span>
+                      </div>
+                    )}
+                    {[['Agents', m.agents?.length || 0], ['Last Seen', timeAgo(m.last_seen)]].map(([k, v]) => (
+                      <div key={String(k)} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-lo)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{k}</span>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-mid)' }}>{v}</span>
+                      </div>
+                    ))}
                   </div>
-                  {m.agents?.length > 0 && <div className="mt-3 pt-3 flex flex-wrap gap-1" style={{ borderTop: '1px solid var(--ink-4)' }}>{m.agents.map((a: any) => <span key={a.agent_id} className="ops-badge ops-badge-purple" style={{ fontSize: 9 }}>{a.handle || a.agent_name}</span>)}</div>}
+                  {m.agents?.length > 0 && (
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--ink-4)', display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                      {m.agents.map((a: any) => (
+                        <span key={a.agent_id} className="ops-badge ops-badge-purple" style={{ fontSize: 9 }}>{a.handle || a.agent_name}</span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -115,35 +179,51 @@ export default function Dashboard() {
         )}
       </div>
 
+      {/* Projects */}
       <div>
-        <div className="flex items-center justify-between mb-3">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <div className="ops-section-header" style={{ marginBottom: 0 }}><FolderKanban size={11} /> Projects</div>
-          <Link to="/projects" className="ops-btn" style={{ padding: '4px 10px', fontSize: 10 }}>View All <ArrowRight size={10} /></Link>
+          <Link to="/projects" className="ops-btn" style={{ padding: '3px 10px', fontSize: 9 }}>View All <ArrowRight size={9} /></Link>
         </div>
         {projects.length === 0 ? (
-          <div className="ops-panel p-8 text-center"><p style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-lo)' }}>No projects. <Link to="/new-project" style={{ color: 'var(--amber)' }}>Create one</Link></p></div>
+          <div className="neon-card" style={{ padding: '2rem', textAlign: 'center' }}>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-lo)' }}>
+              No projects yet. <Link to="/new-project" style={{ color: 'var(--cyan)', textDecoration: 'none' }}>Create one →</Link>
+            </p>
+          </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {projects.slice(0, 6).map((p: any) => (
-              <div key={p.id} className="ops-panel p-4">
-                <div className="flex items-start justify-between mb-3">
-                  <h3 style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600, color: 'var(--text-hi)' }}>{p.name}</h3>
-                  <span className={"ops-badge " + (p.status === 'active' ? 'ops-badge-green' : p.status === 'paused' ? 'ops-badge-amber' : 'ops-badge-gray')} style={{ fontSize: 9 }}>{(p.status || 'unknown').toUpperCase()}</span>
+              <div key={p.id} className="neon-card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+                  <h3 style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: 'var(--text-hi)', lineHeight: 1.3 }}>{p.name}</h3>
+                  <span className={"ops-badge " + (p.status === 'active' ? 'ops-badge-green' : p.status === 'paused' ? 'ops-badge-amber' : 'ops-badge-gray')} style={{ fontSize: 8, flexShrink: 0 }}>
+                    {(p.status || 'unknown').toUpperCase()}
+                  </span>
                 </div>
-                <div className="space-y-1.5 mb-4">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                   {[['Tasks', (p.stats?.activeTasks || 0) + ' / ' + (p.stats?.totalTasks || 0)], ['Today', '$' + (p.stats?.todayCost || 0).toFixed(2)], ['Month', '$' + (p.stats?.monthCost || 0).toFixed(2)]].map(([k, v]) => (
-                    <div key={k} className="flex justify-between">
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-lo)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{k}</span>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-mid)' }}>{v}</span>
+                    <div key={k} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-lo)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{k}</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-mid)' }}>{v}</span>
                     </div>
                   ))}
                 </div>
-                <Link to={"/projects/" + p.id} className="ops-btn" style={{ width: '100%', justifyContent: 'center', display: 'flex' }}>Open <ArrowRight size={10} /></Link>
+                <Link to={"/projects/" + p.id} className="ops-btn ops-btn-primary" style={{ width: '100%', justifyContent: 'center', fontSize: 10, marginTop: 'auto' }}>
+                  Open <ArrowRight size={9} />
+                </Link>
               </div>
             ))}
-            <Link to="/new-project" className="ops-panel flex flex-col items-center justify-center gap-2 p-4" style={{ border: '1px dashed var(--ink-4)', minHeight: 160, cursor: 'pointer' }}>
-              <span style={{ fontSize: 24, color: 'var(--text-dim)' }}>+</span>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-lo)' }}>New Project</span>
+            <Link to="/new-project" className="neon-card" style={{
+              padding: '1rem', minHeight: 150, cursor: 'pointer',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8,
+              border: '1px dashed var(--ink-5)', textDecoration: 'none',
+              transition: 'border-color 120ms',
+            }}
+              onMouseEnter={e => ((e.currentTarget as HTMLElement).style.borderColor = 'rgba(34,211,238,0.3)')}
+              onMouseLeave={e => ((e.currentTarget as HTMLElement).style.borderColor = 'var(--ink-5)')}>
+              <Cpu size={20} style={{ color: 'var(--text-dim)' }} />
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-lo)', letterSpacing: '0.1em' }}>NEW PROJECT</span>
             </Link>
           </div>
         )}

@@ -648,6 +648,38 @@ class SQLiteAdapter {
       CREATE INDEX IF NOT EXISTS idx_task_history_agent ON task_assignment_history(agent_id);
     `);
 
+    // ========== OPENCLAW: AGENT TYPE SYSTEM ==========
+    // Add agent_type, current_mode, current_model, rnd fields to manager_agents
+    const agentCols = [
+      [`ALTER TABLE manager_agents ADD COLUMN agent_type TEXT DEFAULT 'worker' CHECK (agent_type IN ('pm','worker','rnd'));`, 'agent_type'],
+      [`ALTER TABLE manager_agents ADD COLUMN current_mode TEXT;`, 'current_mode'],
+      [`ALTER TABLE manager_agents ADD COLUMN current_model TEXT;`, 'current_model'],
+      [`ALTER TABLE manager_agents ADD COLUMN rnd_division TEXT;`, 'rnd_division'],
+      [`ALTER TABLE manager_agents ADD COLUMN rnd_schedule TEXT;`, 'rnd_schedule'],
+      [`ALTER TABLE manager_agents ADD COLUMN rnd_last_run TEXT;`, 'rnd_last_run'],
+      [`ALTER TABLE manager_agents ADD COLUMN last_heartbeat TEXT;`, 'last_heartbeat'],
+      [`ALTER TABLE manager_agents ADD COLUMN project_id TEXT;`, 'project_id'],
+    ];
+    for (const [sql] of agentCols) {
+      try { this.db.exec(sql); } catch (e) { /* column already exists */ }
+    }
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_manager_agents_type ON manager_agents(agent_type);`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_manager_agents_mode ON manager_agents(current_mode);`);
+
+    // Presets table — stores .md file content with versioning
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS presets (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL CHECK (type IN ('pm_mode','worker_dept','rnd_division')),
+        name TEXT NOT NULL,
+        content TEXT NOT NULL DEFAULT '',
+        version INTEGER DEFAULT 1,
+        last_updated_by TEXT DEFAULT 'system',
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+    `);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_presets_type ON presets(type);`);
+
     // ========== ACTIVITY HISTORY TABLE ==========
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS activity_history (

@@ -1,6 +1,13 @@
 import { useState, useEffect } from 'react';
 import { adminApi, wsClient } from '../services/api';
-import { Shield, CheckCircle, XCircle, Loader2, RefreshCw, Search, Bot, Users, UserCheck, Trash2 } from 'lucide-react';
+import { Shield, CheckCircle, XCircle, Loader2, RefreshCw, Search, Bot, Users, UserCheck, Trash2, Cpu, Radio } from 'lucide-react';
+
+const TYPE_META: Record<string, { icon: React.ReactNode; color: string; label: string }> = {
+  pm:     { icon: <Cpu size={11} />,   color: '#f59e0b', label: 'PM' },
+  worker: { icon: <Bot size={11} />,   color: '#3b82f6', label: 'WORKER' },
+  rnd:    { icon: <Radio size={11} />, color: '#ef4444', label: 'R&D' },
+};
+const getTypeMeta = (t?: string) => TYPE_META[t ?? ''] ?? TYPE_META['worker'];
 
 export default function AdminPanel() {
   const [tab, setTab] = useState<'pending' | 'approved' | 'users'>('pending');
@@ -33,16 +40,21 @@ export default function AdminPanel() {
   // Real-time: new agent registered → add to pending list immediately
   useEffect(() => {
     const onRegistered = (d: any) => {
-      const newAgent = { id: d?.id, name: d?.name, handle: d?.handle, role: d?.role, created_at: d?.registered_at };
+      const newAgent = { id: d?.id, name: d?.name, handle: d?.handle, role: d?.role, agent_type: d?.agent_type, created_at: d?.registered_at };
       setPending(prev => prev.some(a => a.id === newAgent.id) ? prev : [newAgent, ...prev]);
       setOk(`New agent "${d?.name}" is waiting for approval`);
     };
     const onApproved = () => fetchData();
+    const onStatusChanged = (d: any) => {
+      setApproved(prev => prev.map(a => a.id === d.agent_id ? { ...a, status: d.status } : a));
+    };
     wsClient.on('agent:registered', onRegistered);
     wsClient.on('agent:approved', onApproved);
+    wsClient.on('agent:status_changed', onStatusChanged);
     return () => {
       wsClient.off('agent:registered', onRegistered);
       wsClient.off('agent:approved', onApproved);
+      wsClient.off('agent:status_changed', onStatusChanged);
     };
   }, []);
 
@@ -155,15 +167,20 @@ export default function AdminPanel() {
             <p style={{ ...mono, fontSize: 11, color: 'var(--text-lo)', padding: '32px 0', textAlign: 'center' }}>— no pending agent registrations —</p>
           ) : (
             <table className="ops-table w-full">
-              <thead><tr><th>Agent</th><th>Role</th><th>Requested</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
+              <thead><tr><th>Agent</th><th>Type</th><th>Role</th><th>Requested</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
               <tbody>
-                {filtPending.map(a => (
+                {filtPending.map(a => {
+                  const tm = getTypeMeta(a.agent_type);
+                  return (
                   <tr key={a.id}>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Bot size={12} style={{ color: 'var(--text-lo)' }} />
+                        <span style={{ color: tm.color }}>{tm.icon}</span>
                         <span style={{ color: 'var(--text-hi)' }}>{a.name}</span>
                       </div>
+                    </td>
+                    <td>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: tm.color, background: tm.color + '18', border: `1px solid ${tm.color}33`, borderRadius: 2, padding: '2px 6px', letterSpacing: '0.08em' }}>{tm.label}</span>
                     </td>
                     <td style={{ color: 'var(--text-lo)', textTransform: 'uppercase', fontSize: 10 }}>{a.role}</td>
                     <td style={{ color: 'var(--text-lo)', fontSize: 10 }}>{a.requestedAt ? ago(a.requestedAt) : '—'}</td>
@@ -184,7 +201,7 @@ export default function AdminPanel() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  ); })}
               </tbody>
             </table>
           )}
@@ -198,11 +215,14 @@ export default function AdminPanel() {
             <p style={{ ...mono, fontSize: 11, color: 'var(--text-lo)', padding: '32px 0', textAlign: 'center' }}>— no approved agents —</p>
           ) : (
             <table className="ops-table w-full">
-              <thead><tr><th>Agent</th><th>Role</th><th>Approved By</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
+              <thead><tr><th>Agent</th><th>Type</th><th>Role</th><th>Approved By</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
               <tbody>
-                {filtApproved.map(a => (
+                {filtApproved.map(a => {
+                  const tm = getTypeMeta(a.agent_type);
+                  return (
                   <tr key={a.id}>
-                    <td><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Bot size={12} style={{ color: '#10b981' }} /><span style={{ color: 'var(--text-hi)' }}>{a.name}</span></div></td>
+                    <td><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ color: tm.color }}>{tm.icon}</span><span style={{ color: 'var(--text-hi)' }}>{a.name}</span></div></td>
+                    <td><span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: tm.color, background: tm.color + '18', border: `1px solid ${tm.color}33`, borderRadius: 2, padding: '2px 6px', letterSpacing: '0.08em' }}>{tm.label}</span></td>
                     <td style={{ color: 'var(--text-lo)', fontSize: 10, textTransform: 'uppercase' }}>{a.role}</td>
                     <td style={{ color: 'var(--text-lo)', fontSize: 10 }}>{a.approvedBy || '—'}</td>
                     <td><span style={{ ...mono, fontSize: 9, color: a.status === 'active' ? '#10b981' : 'var(--text-lo)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{a.status}</span></td>
@@ -213,7 +233,7 @@ export default function AdminPanel() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  ); })}
               </tbody>
             </table>
           )}

@@ -387,6 +387,8 @@ async function buildServer() {
   fastify.get('/api/admin/agents/approved', { preHandler: authMiddleware }, routes.listApprovedAgentsRoute);
   fastify.get('/api/admin/users', { preHandler: authMiddleware }, routes.listUsersRoute);
   fastify.post('/api/agents/:id/status', { preHandler: authMiddleware }, routes.updateManagerAgentStatusRoute);
+  fastify.patch('/api/agents/:id', { preHandler: authMiddleware }, routes.patchManagerAgentRoute);
+  fastify.post('/api/agents/:id/heartbeat', { preHandler: optionalAuthMiddleware }, routes.agentHeartbeatRoute);
   fastify.get('/api/agents/:id/notifications', { preHandler: authMiddleware }, routes.getAgentNotificationsRoute);
   fastify.post('/api/agents/:id/notifications/:notificationId/read', { preHandler: authMiddleware }, routes.markAgentNotificationReadRoute);
 
@@ -627,6 +629,31 @@ async function start() {
   try {
     const server = await buildServer();
     await server.listen({ port: PORT, host: HOST });
+
+    // ── Agent offline detection cron ──────────────────────────────────────────
+    // Every 60s: mark agents offline if no heartbeat in 90s
+    setInterval(() => {
+      try {
+        const db = getDb();
+        const staleThreshold = new Date(Date.now() - 90 * 1000).toISOString();
+        const staleAgents = db.prepare(`
+          SELECT id, name FROM manager_agents
+          WHERE status = 'online'
+            AND is_approved = 1
+            AND (last_heartbeat IS NULL OR last_heartbeat < ?)
+        `).all(staleThreshold);
+
+        for (const agent of staleAgents) {
+          db.prepare(`UPDATE manager_agents SET status = 'offline', updated_at = ? WHERE id = ?`)
+            .run(new Date().toISOString(), agent.id);
+          wsManager.broadcast('agent:status_changed', { agent_id: agent.id, agent_name: agent.name, status: 'offline' });
+          console.log(`[Heartbeat] Agent ${agent.name} marked offline (no heartbeat)`);
+        }
+      } catch (e) {
+        console.error('[Heartbeat cron error]', e.message);
+      }
+    }, 60 * 1000);
+    // ──────────────────────────────────────────────────────────────────────────
 
     console.log(`🚀 PROJECT-CLAW API Server v1.2.0 running at http://${HOST}:${PORT}`);
     console.log(`📡 WebSocket endpoint: ws://${HOST}:${PORT}/ws`);

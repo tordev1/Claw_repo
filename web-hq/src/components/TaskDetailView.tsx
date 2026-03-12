@@ -136,16 +136,14 @@ export default function TaskDetailView({ task, projectName, onClose, onUpdate, o
 
   const getStatusConfig = (status: Task['status']) => {
     switch (status) {
-      case 'draft':
-        return { color: 'text-slate-400', bg: 'bg-slate-500/20', icon: Clock };
       case 'pending':
         return { color: 'text-yellow-400', bg: 'bg-yellow-500/20', icon: Clock };
-      case 'assigned':
-        return { color: 'text-blue-400', bg: 'bg-blue-500/20', icon: User };
-      case 'in_progress':
+      case 'running':
         return { color: 'text-indigo-400', bg: 'bg-indigo-500/20', icon: Loader2 };
       case 'completed':
         return { color: 'text-green-400', bg: 'bg-green-500/20', icon: CheckCircle2 };
+      case 'failed':
+        return { color: 'text-orange-400', bg: 'bg-orange-500/20', icon: XCircle };
       case 'cancelled':
         return { color: 'text-red-400', bg: 'bg-red-500/20', icon: XCircle };
       default:

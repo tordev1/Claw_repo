@@ -10,6 +10,8 @@ Two services run independently:
 - **`api-server/`** — Fastify + SQLite backend (port 3001)
 - **`web-hq/`** — React + TypeScript + Vite frontend (port 5173)
 
+Requires Node.js >= 18.0.0.
+
 ## Commands
 
 ### Setup (first time or fresh clone)
@@ -18,12 +20,20 @@ cd api-server && npm install
 cd web-hq && npm install
 ```
 
+The root `package.json` mirrors backend scripts — `npm run dev` and `npm start` from root both run the api-server.
+
 ### Backend (`api-server/`)
 ```bash
 npm run dev       # Start with --watch (auto-reload on change)
 npm start         # Production start
 node resetDB.js   # Wipe all operational data, keep admin user Scorpion (restart server after to re-seed)
+npm run seed      # Seed database with mock data (src/seed.js)
+npm run seed:full # Full seed (seed-new.js)
+npm run migrate   # Run migrations (scripts/migrate.js)
+npm run sync:costs # One-shot OpenRouter cost sync
 ```
+
+**Note**: npm scripts use `set NODE_ENV=...` (Windows syntax). On Mac/Linux, replace with `NODE_ENV=... node ...` or use cross-env.
 
 ### Register a test agent (local or Mac Mini on LAN)
 ```bash
@@ -227,3 +237,11 @@ node agentCLI.js --name "TestAgent" --handle testagent
 Frontend env vars in `web-hq/.env`:
 - `VITE_API_URL` — defaults to `http://localhost:3001`
 - `VITE_WS_URL` — defaults to `ws://localhost:3001/ws`
+
+## Docker
+
+Docker Compose files are provided at the repo root:
+- `docker-compose.yml` — dev/default setup (api on port 3001, web on port 80)
+- `docker-compose.prod.yml` — production overrides (resource limits, logging, restart policies)
+
+Both `api-server/` and `web-hq/` have their own `Dockerfile`. The API service exposes a `/health` endpoint used by the Docker healthcheck.

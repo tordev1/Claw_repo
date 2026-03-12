@@ -2,208 +2,378 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { agentsApi } from '../services/api';
 import type { AgentRegistration } from '../services/api';
-import { Bot, Loader2, CheckCircle, ChevronDown, Key, Eye, EyeOff, ArrowLeft } from 'lucide-react';
+import { Loader2, CheckCircle, ArrowLeft, Zap, Bot, Radio, Cpu } from 'lucide-react';
 
-const ROLES = ['Task Lead', 'Researcher', 'Developer', 'Designer', 'QA', 'DevOps'] as const;
-const EXP = [
-  { value: 'Junior', label: 'Junior  · 0–2 yrs' },
-  { value: 'Mid', label: 'Mid     · 2–5 yrs' },
-  { value: 'Senior', label: 'Senior  · 5–8 yrs' },
-  { value: 'Expert', label: 'Expert  · 8+ yrs' },
-] as const;
+// ─── Data ─────────────────────────────────────────────────────────────────────
 
-const m: React.CSSProperties = { fontFamily: 'var(--font-mono)' };
+const AGENT_TYPES = [
+  {
+    id: 'pm' as const,
+    label: 'Project Manager',
+    tag: 'PM',
+    color: '#f59e0b',
+    bg: 'rgba(245,158,11,0.08)',
+    border: 'rgba(245,158,11,0.35)',
+    Icon: Cpu,
+    bullets: ['Leads project delivery', 'Assembles agent teams', 'Defines project mode', 'Breaks down tasks'],
+    defaultSkills: 'planning, coordination, task breakdown, team assembly',
+  },
+  {
+    id: 'worker' as const,
+    label: 'Worker Agent',
+    tag: 'WORKER',
+    color: '#3b82f6',
+    bg: 'rgba(59,130,246,0.08)',
+    border: 'rgba(59,130,246,0.35)',
+    Icon: Bot,
+    bullets: ['Executes assigned tasks', 'Belongs to a department', 'Reports to PM', 'Runs autonomously'],
+    defaultSkills: 'development, implementation, testing, deployment',
+  },
+  {
+    id: 'rnd' as const,
+    label: 'R&D Agent',
+    tag: 'R&D',
+    color: '#ef4444',
+    bg: 'rgba(239,68,68,0.08)',
+    border: 'rgba(239,68,68,0.35)',
+    Icon: Radio,
+    bullets: ['Runs on a schedule', 'Autonomous research', 'Posts to R&D feed', 'No project binding'],
+    defaultSkills: 'research, analysis, monitoring, trend detection',
+  },
+];
 
-const Label = ({ children }: { children: React.ReactNode }) => (
-  <div style={{ ...m, fontSize: 10, color: 'var(--text-lo)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>{children}</div>
-);
+const RND_DIVISIONS = [
+  { id: 'ai_ml_research',    label: 'AI / ML Research',   icon: '⟐', schedule: 'Every 6h' },
+  { id: 'tech_frameworks',   label: 'Tech Frameworks',    icon: '⟑', schedule: 'Daily'    },
+  { id: 'security_intel',    label: 'Security Intel',     icon: '⟒', schedule: 'Every 4h' },
+  { id: 'oss_scout',         label: 'OSS Scout',          icon: '⟓', schedule: 'Daily'    },
+  { id: 'tooling_infra',     label: 'Tooling & Infra',    icon: '⟔', schedule: 'Weekly'   },
+  { id: 'competitive_intel', label: 'Competitive Intel',  icon: '⟕', schedule: 'Weekly'   },
+];
 
-const Section = ({ n, title }: { n: number; title: string }) => (
-  <div className="flex items-center gap-3 mb-4" style={{ borderBottom: '1px solid var(--ink-4)', paddingBottom: 10 }}>
-    <div style={{ width: 22, height: 22, borderRadius: 2, background: 'var(--amber)', display: 'flex', alignItems: 'center', justifyContent: 'center', ...m, fontSize: 11, fontWeight: 700, color: '#000', flexShrink: 0 }}>{n}</div>
-    <span style={{ ...m, fontSize: 11, letterSpacing: '0.1em', color: 'var(--text-mid)', textTransform: 'uppercase' }}>{title}</span>
-  </div>
-);
+const mono: React.CSSProperties = { fontFamily: 'var(--font-mono)' };
+
+// ─── Small helpers ─────────────────────────────────────────────────────────────
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ ...mono, fontSize: 9, color: 'var(--text-lo)', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 6 }}>
+      {children}
+    </div>
+  );
+}
+
+function SectionTag({ n, label, color = 'var(--cyan)' }: { n: string; label: string; color?: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+      <div style={{
+        ...mono, fontSize: 8, padding: '2px 7px', borderRadius: 2,
+        background: `${color}18`, border: `1px solid ${color}40`,
+        color, letterSpacing: '0.15em',
+      }}>{n}</div>
+      <div style={{ ...mono, fontSize: 10, color: 'var(--text-mid)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ flex: 1, height: 1, background: 'var(--ink-4)' }} />
+    </div>
+  );
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function AgentRegistration() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const [showKeys, setShowKeys] = useState(false);
-  const [showOAI, setShowOAI] = useState(false);
-  const [showMS, setShowMS] = useState(false);
-  const [skills, setSkills] = useState('planning, architecture, coordination');
+  const [skills, setSkills] = useState('');
+
   const [form, setForm] = useState<AgentRegistration>({
-    name: '', handle: '', email: '', role: 'Task Lead',
-    skills: [], specialties: '', experience: 'Senior', apiKeys: {}
+    name: '', handle: '', email: '',
+    agent_type: 'worker', rnd_division: '',
+    role: 'Developer', skills: [],
+    specialties: '', experience: 'Senior',
   });
 
   const set = (k: string, v: any) => setForm(p => ({ ...p, [k]: v }));
+  const selected = AGENT_TYPES.find(t => t.id === form.agent_type)!;
+
+  const selectType = (id: 'pm' | 'worker' | 'rnd') => {
+    const t = AGENT_TYPES.find(t => t.id === id)!;
+    set('agent_type', id);
+    if (!skills) setSkills(t.defaultSkills);
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (form.name.trim().length < 2) { setError('Name must be at least 2 characters'); return; }
     if (!/^@[a-zA-Z0-9_-]+$/.test(form.handle)) { setError('Handle must start with @ and use only letters, numbers, _ or -'); return; }
     if (form.handle.replace('@', '').length < 3) { setError('Handle must be at least 3 characters after @'); return; }
+    if (form.agent_type === 'rnd' && !form.rnd_division) { setError('R&D agents must select a division'); return; }
     setLoading(true); setError(null);
     try {
-      await agentsApi.register({ ...form, skills: skills.split(',').map(s => s.trim()).filter(Boolean) });
+      await agentsApi.register({
+        ...form,
+        skills: skills.split(',').map(s => s.trim()).filter(Boolean),
+        rnd_division: form.agent_type === 'rnd' ? form.rnd_division : undefined,
+      });
       setSuccess(true);
     } catch (e: any) { setError(e.message || 'Registration failed'); }
     finally { setLoading(false); }
   };
 
-  if (success) return (
-    <div className="flex items-center justify-center min-h-[60vh]">
-      <div className="ops-panel p-10 text-center space-y-5" style={{ maxWidth: 460, width: '100%' }}>
-        <div style={{ width: 48, height: 48, borderRadius: 2, background: '#10b98120', border: '1px solid #10b98140', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto' }}>
-          <CheckCircle size={22} style={{ color: '#10b981' }} />
-        </div>
-        <div>
-          <div style={{ ...m, fontSize: 16, fontWeight: 700, color: 'var(--text-hi)', letterSpacing: '-0.01em' }}>REGISTRATION SUBMITTED</div>
-          <div style={{ ...m, fontSize: 11, color: 'var(--text-lo)', marginTop: 8, lineHeight: 1.6 }}>Pending admin approval. You'll be notified once reviewed.</div>
-        </div>
-        <div className="flex gap-2 justify-center">
-          <button onClick={() => navigate('/agents')} className="ops-btn">View Agents</button>
-          <button onClick={() => navigate('/')} className="ops-btn">Dashboard</button>
+  // ── Success ────────────────────────────────────────────────────────────────
+  if (success) {
+    const { Icon } = selected;
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '65vh' }}>
+        <div style={{
+          background: 'var(--ink-2)', border: `1px solid ${selected.border}`,
+          borderRadius: 10, padding: '48px 40px', textAlign: 'center', maxWidth: 400, width: '100%',
+          boxShadow: `0 0 60px ${selected.bg}`,
+          position: 'relative', overflow: 'hidden',
+        }}>
+          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, transparent, ${selected.color}, transparent)` }} />
+          <div style={{
+            width: 56, height: 56, borderRadius: 8, margin: '0 auto 20px',
+            background: selected.bg, border: `1px solid ${selected.border}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Icon size={24} style={{ color: selected.color }} />
+          </div>
+          <CheckCircle size={18} style={{ color: '#10b981', marginBottom: 12 }} />
+          <div style={{ ...mono, fontSize: 18, fontWeight: 700, color: 'var(--text-hi)', letterSpacing: '0.06em', marginBottom: 6 }}>
+            REGISTERED
+          </div>
+          <div style={{ ...mono, fontSize: 11, color: selected.color, marginBottom: 16, letterSpacing: '0.1em' }}>
+            {selected.tag} · {form.name} · @{form.handle.replace('@', '')}
+          </div>
+          <div style={{ ...mono, fontSize: 10, color: 'var(--text-lo)', lineHeight: 1.8, marginBottom: 28 }}>
+            Pending admin approval. Once approved the agent<br />can go online and accept assignments.
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => navigate('/admin')} className="ops-btn ops-btn-primary" style={{ flex: 1, justifyContent: 'center', fontSize: 10 }}>
+              Approve in Admin
+            </button>
+            <button onClick={() => navigate('/hq')} className="ops-btn" style={{ flex: 1, justifyContent: 'center', fontSize: 10 }}>
+              Back to HQ
+            </button>
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  }
+
+  // ── Form ───────────────────────────────────────────────────────────────────
+  const stepOffset = form.agent_type === 'rnd' ? 1 : 0;
 
   return (
-    <div className="animate-fade-up" style={{ maxWidth: 640, margin: '0 auto' }}>
-      <div className="flex items-center gap-4 mb-6">
-        <Link to="/agents" style={{ color: 'var(--text-lo)', display: 'flex', alignItems: 'center' }}><ArrowLeft size={16} /></Link>
-        <div>
-          <div className="ops-section-header" style={{ marginBottom: 2 }}>Admin</div>
-          <h1 style={{ ...m, fontSize: 20, fontWeight: 700, color: 'var(--text-hi)', letterSpacing: '-0.02em' }}>REGISTER AGENT</h1>
+    <div className="animate-fade-up" style={{ maxWidth: 660, margin: '0 auto', paddingBottom: 40 }}>
+
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 28 }}>
+        <Link to="/hq" style={{ color: 'var(--text-lo)', display: 'flex', alignItems: 'center', marginTop: 4 }}>
+          <ArrowLeft size={15} />
+        </Link>
+        <div style={{ flex: 1 }}>
+          <div style={{ ...mono, fontSize: 9, color: 'var(--cyan)', letterSpacing: '0.18em', marginBottom: 4 }}>// NEW AGENT</div>
+          <h1 style={{ ...mono, fontSize: 22, fontWeight: 700, color: 'var(--text-hi)', letterSpacing: '0.04em', margin: 0 }}>
+            REGISTER AGENT
+          </h1>
+        </div>
+        {/* Live type badge */}
+        <div style={{
+          ...mono, fontSize: 9, padding: '4px 12px', borderRadius: 3,
+          background: selected.bg, border: `1px solid ${selected.border}`,
+          color: selected.color, letterSpacing: '0.12em', alignSelf: 'center',
+        }}>
+          {selected.tag}
         </div>
       </div>
 
+      {/* ── Error ──────────────────────────────────────────────────────────── */}
       {error && (
-        <div style={{ ...m, fontSize: 11, color: '#ef4444', background: 'var(--ink-2)', border: '1px solid #7f1d1d', borderRadius: 2, padding: '10px 14px', marginBottom: 16 }}>
-          ERR: {error}
-        </div>
+        <div style={{
+          ...mono, fontSize: 10, color: '#ef4444',
+          background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.25)',
+          borderRadius: 4, padding: '10px 14px', marginBottom: 16, lineHeight: 1.5,
+        }}>⚠ {error}</div>
       )}
 
-      <form onSubmit={submit} className="space-y-5">
+      <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-        {/* 1 — Identity */}
-        <div className="ops-panel p-5">
-          <Section n={1} title="Identity" />
-          <div className="grid grid-cols-2 gap-3 mb-3">
+        {/* ── 01 AGENT TYPE ────────────────────────────────────────────────── */}
+        <div style={{
+          background: 'var(--ink-2)', border: '1px solid var(--ink-4)',
+          borderRadius: 8, padding: '20px 22px',
+          boxShadow: `0 0 0 1px ${selected.border}, 0 0 30px ${selected.bg}`,
+          transition: 'box-shadow 200ms',
+        }}>
+          <SectionTag n="01" label="Agent Type" color={selected.color} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+            {AGENT_TYPES.map(t => {
+              const { Icon: TIcon } = t;
+              const active = form.agent_type === t.id;
+              return (
+                <button key={t.id} type="button" onClick={() => selectType(t.id)} style={{
+                  background: active ? t.bg : 'var(--ink-1)',
+                  border: `1.5px solid ${active ? t.color : 'var(--ink-4)'}`,
+                  borderRadius: 7, padding: '16px 14px',
+                  cursor: 'pointer', textAlign: 'left', transition: 'all 140ms',
+                  boxShadow: active ? `0 0 24px ${t.bg}` : 'none',
+                  position: 'relative', overflow: 'hidden',
+                }}>
+                  {/* top glow line */}
+                  {active && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, transparent, ${t.color}, transparent)` }} />}
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <div style={{
+                      width: 32, height: 32, borderRadius: 5,
+                      background: active ? `${t.color}20` : 'var(--ink-3)',
+                      border: `1px solid ${active ? `${t.color}40` : 'var(--ink-4)'}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <TIcon size={15} style={{ color: active ? t.color : 'var(--text-lo)' }} />
+                    </div>
+                    {active && (
+                      <div style={{ width: 7, height: 7, borderRadius: '50%', background: t.color, boxShadow: `0 0 8px ${t.color}` }} />
+                    )}
+                  </div>
+
+                  <div style={{ ...mono, fontSize: 12, fontWeight: 700, color: active ? t.color : 'var(--text-hi)', letterSpacing: '0.06em', marginBottom: 3 }}>
+                    {t.tag}
+                  </div>
+                  <div style={{ ...mono, fontSize: 9, color: 'var(--text-lo)', marginBottom: active ? 12 : 0 }}>
+                    {t.label}
+                  </div>
+
+                  {active && (
+                    <div style={{ borderTop: `1px solid ${t.color}25`, paddingTop: 10 }}>
+                      {t.bullets.map(b => (
+                        <div key={b} style={{ ...mono, fontSize: 8, color: 'var(--text-lo)', lineHeight: 2, display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <span style={{ color: t.color, fontSize: 10 }}>·</span> {b}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ── 02 R&D DIVISION ──────────────────────────────────────────────── */}
+        {form.agent_type === 'rnd' && (
+          <div style={{
+            background: 'var(--ink-2)', border: '1px solid rgba(239,68,68,0.2)',
+            borderRadius: 8, padding: '20px 22px',
+          }}>
+            <SectionTag n="02" label="R&D Division" color="#ef4444" />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              {RND_DIVISIONS.map(div => {
+                const active = form.rnd_division === div.id;
+                return (
+                  <button key={div.id} type="button" onClick={() => set('rnd_division', div.id)} style={{
+                    background: active ? 'rgba(239,68,68,0.1)' : 'var(--ink-1)',
+                    border: `1px solid ${active ? 'rgba(239,68,68,0.45)' : 'var(--ink-4)'}`,
+                    borderRadius: 5, padding: '10px 12px', cursor: 'pointer',
+                    textAlign: 'left', transition: 'all 100ms',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                      <span style={{ fontSize: 13, color: active ? '#ef4444' : 'var(--text-lo)' }}>{div.icon}</span>
+                      <span style={{ ...mono, fontSize: 9, fontWeight: 700, color: active ? '#ef4444' : 'var(--text-mid)' }}>
+                        {div.label}
+                      </span>
+                    </div>
+                    <div style={{ ...mono, fontSize: 8, color: 'var(--text-lo)' }}>{div.schedule}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── IDENTITY ─────────────────────────────────────────────────────── */}
+        <div style={{ background: 'var(--ink-2)', border: '1px solid var(--ink-4)', borderRadius: 8, padding: '20px 22px' }}>
+          <SectionTag n={`0${2 + stepOffset}`} label="Identity" />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
-              <Label>Name <span style={{ color: '#ef4444' }}>*</span></Label>
-              <input type="text" value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g., Sigma"
-                className="ops-input" style={{ width: '100%' }} disabled={loading} />
-              <div style={{ ...m, fontSize: 9, color: form.name.length >= 2 ? '#10b981' : 'var(--text-lo)', marginTop: 4 }}>{form.name.length}/2+ chars</div>
+              <FieldLabel>Name <span style={{ color: '#ef4444' }}>*</span></FieldLabel>
+              <input
+                type="text" value={form.name} onChange={e => set('name', e.target.value)}
+                placeholder={form.agent_type === 'pm' ? 'ATLAS-PM' : form.agent_type === 'rnd' ? 'SEER-AI' : 'NOVA-FE'}
+                className="ops-input" style={{ width: '100%' }} disabled={loading}
+              />
+              <div style={{ ...mono, fontSize: 8, color: form.name.length >= 2 ? '#10b981' : 'var(--text-lo)', marginTop: 4 }}>
+                {form.name.length >= 2 ? '✓ valid' : `${form.name.length}/2 min`}
+              </div>
             </div>
             <div>
-              <Label>Handle <span style={{ color: '#ef4444' }}>*</span></Label>
-              <input type="text" value={form.handle} onChange={e => set('handle', e.target.value)} placeholder="@sigma"
-                className="ops-input" style={{ width: '100%' }} disabled={loading} />
-              <div style={{ ...m, fontSize: 9, color: form.handle.replace('@', '').length >= 3 ? '#10b981' : 'var(--text-lo)', marginTop: 4 }}>{form.handle.replace('@', '').length}/3+ after @</div>
+              <FieldLabel>Handle <span style={{ color: '#ef4444' }}>*</span></FieldLabel>
+              <input
+                type="text" value={form.handle} onChange={e => set('handle', e.target.value)}
+                placeholder={form.agent_type === 'pm' ? '@atlas_pm' : form.agent_type === 'rnd' ? '@seer_ai' : '@nova_fe'}
+                className="ops-input" style={{ width: '100%' }} disabled={loading}
+              />
+              <div style={{ ...mono, fontSize: 8, color: /^@[a-zA-Z0-9_-]{3,}$/.test(form.handle) ? '#10b981' : 'var(--text-lo)', marginTop: 4 }}>
+                {/^@[a-zA-Z0-9_-]{3,}$/.test(form.handle) ? '✓ valid' : 'must start with @'}
+              </div>
             </div>
           </div>
           <div>
-            <Label>Email <span style={{ color: 'var(--text-lo)' }}>(optional)</span></Label>
-            <input type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="sigma@project-claw.ai"
-              className="ops-input" style={{ width: '100%' }} disabled={loading} />
+            <FieldLabel>Email <span style={{ color: 'var(--text-lo)' }}>(optional)</span></FieldLabel>
+            <input type="email" value={form.email} onChange={e => set('email', e.target.value)}
+              placeholder="agent@project-claw.ai" className="ops-input" style={{ width: '100%' }} disabled={loading} />
           </div>
         </div>
 
-        {/* 2 — Role */}
-        <div className="ops-panel p-5">
-          <Section n={2} title="Role & Experience" />
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Role <span style={{ color: '#ef4444' }}>*</span></Label>
-              <div style={{ position: 'relative' }}>
-                <select value={form.role} onChange={e => set('role', e.target.value)} className="ops-input" style={{ width: '100%', cursor: 'pointer', appearance: 'none', paddingRight: 28 }} disabled={loading}>
-                  {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-                </select>
-                <ChevronDown size={12} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-lo)', pointerEvents: 'none' }} />
-              </div>
-            </div>
-            <div>
-              <Label>Experience <span style={{ color: '#ef4444' }}>*</span></Label>
-              <div style={{ position: 'relative' }}>
-                <select value={form.experience} onChange={e => set('experience', e.target.value)} className="ops-input" style={{ width: '100%', cursor: 'pointer', appearance: 'none', paddingRight: 28 }} disabled={loading}>
-                  {EXP.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
-                </select>
-                <ChevronDown size={12} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-lo)', pointerEvents: 'none' }} />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* 3 — Skills */}
-        <div className="ops-panel p-5">
-          <Section n={3} title="Skills & Specialties" />
-          <div className="mb-3">
-            <Label>Skills <span style={{ ...m, fontSize: 9, color: 'var(--text-lo)', textTransform: 'none' }}>(comma-separated)</span></Label>
-            <input type="text" value={skills} onChange={e => setSkills(e.target.value)} placeholder="planning, react, python..."
-              className="ops-input" style={{ width: '100%' }} disabled={loading} />
-            {/* tag preview */}
-            {skills && (
-              <div className="flex flex-wrap gap-1 mt-2">
+        {/* ── CAPABILITIES ──────────────────────────────────────────────────── */}
+        <div style={{ background: 'var(--ink-2)', border: '1px solid var(--ink-4)', borderRadius: 8, padding: '20px 22px' }}>
+          <SectionTag n={`0${3 + stepOffset}`} label="Capabilities" />
+          <div style={{ marginBottom: 12 }}>
+            <FieldLabel>Skills <span style={{ ...mono, fontSize: 8, color: 'var(--text-lo)', textTransform: 'none', letterSpacing: 0 }}>(comma-separated)</span></FieldLabel>
+            <input
+              type="text" value={skills} onChange={e => setSkills(e.target.value)}
+              placeholder="e.g., react, typescript, testing, ci/cd..."
+              className="ops-input" style={{ width: '100%' }} disabled={loading}
+            />
+            {skills.trim() && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>
                 {skills.split(',').map(s => s.trim()).filter(Boolean).map(s => (
-                  <span key={s} style={{ ...m, fontSize: 9, color: 'var(--amber)', background: 'var(--amber)15', border: '1px solid var(--amber)33', borderRadius: 2, padding: '2px 7px' }}>{s}</span>
+                  <span key={s} style={{
+                    ...mono, fontSize: 8, padding: '2px 8px', borderRadius: 2,
+                    color: selected.color, background: selected.bg, border: `1px solid ${selected.border}`,
+                  }}>{s}</span>
                 ))}
               </div>
             )}
           </div>
           <div>
-            <Label>Specialties</Label>
-            <textarea rows={3} value={form.specialties} onChange={e => set('specialties', e.target.value)}
-              placeholder="Describe expertise, notable capabilities..." className="ops-input" style={{ width: '100%', resize: 'vertical', minHeight: 72 }} disabled={loading} />
+            <FieldLabel>Specialties</FieldLabel>
+            <textarea
+              rows={2} value={form.specialties} onChange={e => set('specialties', e.target.value)}
+              placeholder="Describe expertise, domain knowledge, notable capabilities..."
+              className="ops-input" style={{ width: '100%', resize: 'vertical', minHeight: 64 }} disabled={loading}
+            />
           </div>
         </div>
 
-        {/* 4 — API Keys (collapsible) */}
-        <div className="ops-panel p-5">
-          <button type="button" onClick={() => setShowKeys(!showKeys)}
-            className="flex items-center gap-2 w-full" style={{ background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
-            <Key size={12} style={{ color: 'var(--text-lo)' }} />
-            <span style={{ ...m, fontSize: 11, letterSpacing: '0.08em', color: 'var(--text-mid)', textTransform: 'uppercase' }}>API Keys</span>
-            <span style={{ ...m, fontSize: 9, color: 'var(--text-lo)', marginLeft: 4 }}>(optional)</span>
-            <ChevronDown size={11} style={{ marginLeft: 'auto', color: 'var(--text-lo)', transform: showKeys ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }} />
-          </button>
-
-          {showKeys && (
-            <div className="mt-4 space-y-3" style={{ borderTop: '1px solid var(--ink-4)', paddingTop: 14 }}>
-              {[
-                { key: 'openai', label: 'OpenAI API Key', placeholder: 'sk-...', show: showOAI, toggle: () => setShowOAI(!showOAI) },
-                { key: 'moonshot', label: 'Moonshot API Key', placeholder: 'ms-...', show: showMS, toggle: () => setShowMS(!showMS) },
-              ].map(k => (
-                <div key={k.key}>
-                  <Label>{k.label}</Label>
-                  <div style={{ position: 'relative' }}>
-                    <input type={k.show ? 'text' : 'password'} value={(form.apiKeys as any)?.[k.key] || ''}
-                      onChange={e => set('apiKeys', { ...form.apiKeys, [k.key]: e.target.value })}
-                      placeholder={k.placeholder} className="ops-input" style={{ width: '100%', paddingRight: 32 }} disabled={loading} />
-                    <button type="button" onClick={k.toggle} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-lo)', display: 'flex', alignItems: 'center' }}>
-                      {k.show ? <EyeOff size={12} /> : <Eye size={12} />}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Note */}
-        <div style={{ ...m, fontSize: 10, color: 'var(--text-lo)', background: 'var(--ink-2)', border: '1px solid var(--ink-4)', borderRadius: 2, padding: '10px 14px', lineHeight: 1.6 }}>
-          ℹ Registration is reviewed by an admin before activation. You'll be notified once approved.
-        </div>
-
-        {/* Submit */}
-        <button type="submit" disabled={loading || !form.name.trim() || !form.handle.trim()}
-          className="ops-btn w-full flex items-center justify-center gap-2"
-          style={{ padding: '12px', background: 'var(--amber)', color: '#000', borderColor: 'var(--amber)', fontSize: 12, opacity: loading || !form.name.trim() || !form.handle.trim() ? 0.5 : 1 }}>
-          {loading ? <><Loader2 size={13} className="animate-spin" /> SUBMITTING...</> : <><Bot size={13} /> REGISTER AGENT</>}
+        {/* ── SUBMIT ───────────────────────────────────────────────────────── */}
+        <button
+          type="submit"
+          disabled={loading || form.name.trim().length < 2 || form.handle.replace('@','').length < 3}
+          style={{
+            ...mono, width: '100%', padding: '14px 0', fontSize: 11, fontWeight: 700,
+            letterSpacing: '0.1em', borderRadius: 7, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            background: selected.bg, border: `1.5px solid ${selected.border}`,
+            color: selected.color, transition: 'all 150ms',
+            boxShadow: `0 0 30px ${selected.bg}`,
+            opacity: loading || form.name.trim().length < 2 || form.handle.replace('@','').length < 3 ? 0.4 : 1,
+          }}
+        >
+          {loading
+            ? <><Loader2 size={13} className="animate-spin" /> REGISTERING...</>
+            : <><Zap size={13} /> REGISTER {selected.tag} AGENT</>
+          }
         </button>
 
       </form>

@@ -30,12 +30,11 @@ interface TaskColumn {
 }
 
 const COLUMNS: TaskColumn[] = [
-  { id: 'draft', title: 'Draft', color: 'bg-slate-500', icon: Circle },
-  { id: 'pending', title: 'Pending', color: 'bg-yellow-500', icon: Clock },
-  { id: 'assigned', title: 'Assigned', color: 'bg-blue-500', icon: User },
-  { id: 'in_progress', title: 'In Progress', color: 'bg-indigo-500', icon: Loader2 },
-  { id: 'completed', title: 'Completed', color: 'bg-green-500', icon: CheckCircle2 },
-  { id: 'cancelled', title: 'Cancelled', color: 'bg-red-500', icon: AlertCircle },
+  { id: 'pending',   title: 'Pending',   color: 'bg-yellow-500', icon: Clock },
+  { id: 'running',   title: 'Running',   color: 'bg-indigo-500', icon: Loader2 },
+  { id: 'completed', title: 'Completed', color: 'bg-green-500',  icon: CheckCircle2 },
+  { id: 'failed',    title: 'Failed',    color: 'bg-orange-500', icon: AlertCircle },
+  { id: 'cancelled', title: 'Cancelled', color: 'bg-red-500',    icon: Circle },
 ];
 
 export default function KanbanBoard({ projectId, projectName }: KanbanBoardProps) {

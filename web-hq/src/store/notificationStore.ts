@@ -86,6 +86,20 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 wsClient.on('notification:new', (data: any) => pushNotification(data));
 wsClient.on('user:notification', (data: any) => pushNotification(data));
 
+// Agent registration → live bell notification for admin
+wsClient.on('agent:registered', (data: any) => {
+    if (!data) return;
+    useNotificationStore.getState()._addLive({
+        id: `agent-reg-${data.id ?? Date.now()}`,
+        type: 'agent_registered',
+        title: 'New Agent Registration',
+        content: `${data.name ?? 'An agent'} is waiting for approval`,
+        data: { agent_id: data.id, agent_name: data.name },
+        is_read: false,
+        created_at: new Date().toISOString(),
+    });
+});
+
 function pushNotification(data: any) {
     if (!data) return;
     useNotificationStore.getState()._addLive({

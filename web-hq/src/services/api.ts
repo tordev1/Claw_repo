@@ -75,7 +75,7 @@ export interface Task {
   title: string;
   description: string;
   project_id: string;
-  status: 'draft' | 'pending' | 'assigned' | 'in_progress' | 'completed' | 'cancelled';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   priority: 'low' | 'medium' | 'high' | 'critical';
   created_by: string;
   created_at: string;
@@ -307,6 +307,8 @@ export interface AgentRegistration {
   name: string;
   handle: string;
   email?: string;
+  agent_type: 'pm' | 'worker' | 'rnd';
+  rnd_division?: string;
   role: 'Task Lead' | 'Researcher' | 'Developer' | 'Designer' | 'QA' | 'DevOps';
   skills: string[];
   specialties?: string;
@@ -425,55 +427,66 @@ export const tokensApi = {
 // WebSocket client
 export class WebSocketClient {
   private ws: WebSocket | null = null;
-  private reconnectInterval = 3000;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectDelay = 2000;
+  private reconnectAttempts = 0;
   private projectIds: string[] = [];
   private channelIds: string[] = [];
   private messageHandlers: Map<string, ((data: any) => void)[]> = new Map();
   private currentUserId: string | undefined = undefined;
+  private intentionalClose = false;
 
   connect(projectIds: string[] = [], userId?: string) {
     this.projectIds = projectIds;
     this.currentUserId = userId;
+    this.intentionalClose = false;
+
+    // Don't reconnect if already open
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
+    // Close any existing connection cleanly
+    if (this.ws && this.ws.readyState !== WebSocket.CLOSED) {
+      this.intentionalClose = true;
+      this.ws.close();
+    }
+
     const token = localStorage.getItem('claw_token') || '';
+    if (!token) return; // Don't connect without a token
+
     const params = new URLSearchParams();
-    if (token) params.set('token', token);
+    params.set('token', token);
     if (projectIds.length > 0) params.set('projects', projectIds.join(','));
-    const url = `${WS_URL}${params.toString() ? '?' + params.toString() : ''}`;
+    const url = `${WS_URL}?${params.toString()}`;
 
     this.ws = new WebSocket(url);
 
     this.ws.onopen = () => {
-      console.log('WebSocket connected');
-      if (this.reconnectTimer) {
-        clearTimeout(this.reconnectTimer);
-        this.reconnectTimer = null;
-      }
+      this.reconnectAttempts = 0;
+      this.reconnectDelay = 2000;
+      if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
       this.emit('connected', {});
-
-      // Re-subscribe to channels after reconnect
       this.channelIds.forEach(channelId => {
-        this.sendMessage({
-          action: 'subscribe_channel',
-          channel_id: channelId
-        });
+        this.sendMessage({ action: 'subscribe_channel', channel_id: channelId });
       });
     };
 
     this.ws.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      this.emit(message.event, message.data);
+      try {
+        const message = JSON.parse(event.data);
+        this.emit(message.event, message.data);
+      } catch { /* ignore malformed messages */ }
     };
 
     this.ws.onclose = () => {
-      console.log('WebSocket disconnected, reconnecting...');
+      if (this.intentionalClose) return;
       this.emit('disconnected', {});
-      this.reconnectTimer = setTimeout(() => this.connect(this.projectIds, this.currentUserId), this.reconnectInterval);
+      // Exponential backoff: 2s, 4s, 8s, max 30s
+      this.reconnectAttempts++;
+      this.reconnectDelay = Math.min(2000 * Math.pow(1.5, this.reconnectAttempts - 1), 30000);
+      this.reconnectTimer = setTimeout(() => this.connect(this.projectIds, this.currentUserId), this.reconnectDelay);
     };
 
-    this.ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      this.emit('error', error);
+    this.ws.onerror = () => {
+      // Error detail not useful — close event will trigger reconnect
     };
   }
 

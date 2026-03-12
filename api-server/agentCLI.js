@@ -3,8 +3,10 @@
  * agent-cli.js — PROJECT-CLAW test agent
  *
  * Usage:
- *   node agent-cli.js --name "Sigma" --handle sigma
- *   node agent-cli.js --name "Sigma" --handle sigma --login Scorpion --password admin123
+ *   node agentCLI.js --name "Sigma" --handle sigma
+ *   node agentCLI.js --name "Atlas" --handle atlas --type pm --mode saas
+ *   node agentCLI.js --name "Seer" --handle seer --type rnd --division ai_ml_research
+ *   node agentCLI.js --name "Nova" --handle nova --type worker
  */
 
 const http = require('http');
@@ -23,6 +25,9 @@ const get = (f, d) => { const i = args.indexOf(f); return i !== -1 ? args[i + 1]
 const AGENT_NAME = get('--name', 'TestAgent');
 const AGENT_HANDLE = get('--handle', 'testagent');
 const AGENT_SKILLS = get('--skills', 'general,testing').split(',').map(s => s.trim());
+const AGENT_TYPE = get('--type', 'worker'); // pm | worker | rnd
+const AGENT_MODE = get('--mode', null);     // e.g. saas, mobile_app (PM modes)
+const AGENT_DIVISION = get('--division', null); // e.g. ai_ml_research (R&D divisions)
 
 const C = { G: '\x1b[32m', Y: '\x1b[33m', C: '\x1b[36m', R: '\x1b[31m', B: '\x1b[1m', X: '\x1b[0m', A: '\x1b[33m' };
 const log = (tag, msg, c = C.X) => console.log(`${c}[${new Date().toLocaleTimeString()}] [${tag}]${C.X} ${msg}`);
@@ -231,12 +236,17 @@ async function main() {
     console.log(`╚══════════════════════════════════════╝${C.X}\n`);
 
     // ── Step 1: Register agent (no admin credentials needed) ─────────────────
-    log('INIT', `Registering agent "${AGENT_NAME}" @${AGENT_HANDLE}...`, C.C);
-    const regRes = await req('POST', '/api/agents/register', {
+    const typeLabel = AGENT_TYPE === 'pm' ? 'PROJECT MANAGER' : AGENT_TYPE === 'rnd' ? 'R&D' : 'WORKER';
+    log('INIT', `Registering ${typeLabel} agent "${AGENT_NAME}" @${AGENT_HANDLE}${AGENT_MODE ? ` [mode: ${AGENT_MODE}]` : ''}${AGENT_DIVISION ? ` [division: ${AGENT_DIVISION}]` : ''}...`, C.C);
+    const regBody = {
         name: AGENT_NAME, handle: AGENT_HANDLE,
-        description: `CLI agent — ${AGENT_NAME}`,
+        description: `CLI agent — ${AGENT_NAME} [${AGENT_TYPE.toUpperCase()}]`,
         skills: AGENT_SKILLS, preferred_model: 'gpt-4o', experience_level: 'expert',
-    });
+        agent_type: AGENT_TYPE,
+    };
+    if (AGENT_MODE) regBody.current_mode = AGENT_MODE;
+    if (AGENT_DIVISION) regBody.rnd_division = AGENT_DIVISION;
+    const regRes = await req('POST', '/api/agents/register', regBody);
 
     let agentId, userToken;
     if (regRes.status === 201 || regRes.status === 200) {
@@ -341,6 +351,12 @@ async function main() {
 
     // Notification fallback poll every 15s
     setInterval(() => pollNotifications(agentId, userToken), 15000);
+
+    // HTTP heartbeat every 30s — keeps agent status = online, triggers offline detection if CLI stops
+    const sendHeartbeat = () => req('POST', `/api/agents/${agentId}/heartbeat`, {}, userToken)
+        .catch(() => {}); // silent fail — WS reconnect will handle
+    sendHeartbeat(); // immediate first beat
+    setInterval(sendHeartbeat, 30000);
 
     console.log(`\n${C.B}${C.G}╔══════════════════════════════════════╗`);
     console.log(`║  ${AGENT_NAME} is ONLINE  ║`);
