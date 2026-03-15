@@ -32,7 +32,10 @@ const {
   updateAgentStatusSchema,
   editMessageSchema,
   recordTokenUsageSchema,
+  updateProfileSchema,
+  updatePreferencesSchema,
 } = require('./validators');
+const authRoutes = require('./auth.routes');
 
 const PORT = config.PORT;
 const HOST = config.HOST;
@@ -410,6 +413,10 @@ async function buildServer() {
   fastify.post('/api/auth/logout', { preHandler: authMiddleware }, routes.logoutRoute);
   fastify.get('/api/auth/me', { preHandler: authMiddleware }, routes.getMeRoute);
   fastify.post('/api/auth/register', { preHandler: validate(registerUserSchema) }, routes.registerRoute);
+  fastify.patch('/api/auth/me', { preHandler: [authMiddleware, validate(updateProfileSchema)] }, routes.updateProfileRoute);
+  fastify.post('/api/auth/change-password', { preHandler: authMiddleware }, authRoutes.changePassword);
+  fastify.get('/api/user/preferences', { preHandler: authMiddleware }, routes.getPreferencesRoute);
+  fastify.put('/api/user/preferences', { preHandler: [authMiddleware, validate(updatePreferencesSchema)] }, routes.updatePreferencesRoute);
 
   // ============================================================================
   // MANAGER AGENT ROUTES (NEW)

@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Settings as SettingsIcon, Bell, Shield, User, Save, CheckCircle, AlertCircle } from 'lucide-react';
-import { userSession, authApi } from '../services/api';
+import { userSession, authApi, userApi } from '../services/api';
 
 const TABS = [
   { id: 'profile', label: 'PROFILE', icon: User },
@@ -65,6 +65,14 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
 
+  useEffect(() => {
+    userApi.getPreferences().then(res => {
+      setNotifyTasks(res.preferences.notify_tasks);
+      setNotifyMessages(res.preferences.notify_messages);
+      setNotifyAgents(res.preferences.notify_agents);
+    }).catch(() => {});
+  }, []);
+
   const showStatus = (type: 'ok' | 'err', msg: string) => {
     setStatus({ type, msg });
     setTimeout(() => setStatus(null), 3000);
@@ -73,14 +81,32 @@ export default function Settings() {
   const saveProfile = async () => {
     setSaving(true);
     try {
-      // Update local session name
-      const stored = userSession.getUser();
+      await userApi.updateProfile({ name, email });
+      // Update localStorage with new data too
+      const stored = localStorage.getItem('claw_user');
       if (stored) {
-        localStorage.setItem('claw_user', JSON.stringify({ ...stored, name, email }));
+        const user = JSON.parse(stored);
+        localStorage.setItem('claw_user', JSON.stringify({ ...user, name, email }));
       }
-      showStatus('ok', 'Profile saved');
-    } catch {
-      showStatus('err', 'Failed to save');
+      showStatus('ok', 'Profile updated successfully');
+    } catch (err: any) {
+      showStatus('err', err.message || 'Failed to update profile');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveNotifications = async () => {
+    setSaving(true);
+    try {
+      await userApi.updatePreferences({
+        notify_tasks: notifyTasks,
+        notify_messages: notifyMessages,
+        notify_agents: notifyAgents,
+      });
+      showStatus('ok', 'Notification preferences saved');
+    } catch (err: any) {
+      showStatus('err', err.message || 'Failed to save preferences');
     } finally {
       setSaving(false);
     }
@@ -92,9 +118,15 @@ export default function Settings() {
     if (newPw !== confirmPw) return showStatus('err', 'Passwords do not match');
     setSaving(true);
     try {
-      await authApi.changePassword?.(currentPw, newPw);
+      await authApi.changePassword(currentPw, newPw);
       setCurrentPw(''); setNewPw(''); setConfirmPw('');
-      showStatus('ok', 'Password changed');
+      showStatus('ok', 'Password changed. Please log in again.');
+      // Clear session and redirect to login after a short delay
+      setTimeout(() => {
+        localStorage.removeItem('claw_token');
+        localStorage.removeItem('claw_user');
+        window.location.href = '/';
+      }, 2000);
     } catch (e: any) {
       showStatus('err', e.message || 'Failed to change password');
     } finally {
@@ -169,8 +201,8 @@ export default function Settings() {
               <Toggle checked={notifyMessages} onChange={setNotifyMessages} label="New direct messages" />
               <Toggle checked={notifyAgents} onChange={setNotifyAgents} label="Agent status changes" />
               <div style={{ paddingTop: 8, borderTop: '1px solid var(--ink-4)' }}>
-                <button onClick={() => showStatus('ok', 'Preferences saved')} className="ops-btn" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Save size={11} /> Save Preferences
+                <button onClick={saveNotifications} disabled={saving} className="ops-btn" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Save size={11} /> {saving ? 'Saving...' : 'Save Preferences'}
                 </button>
               </div>
             </div>

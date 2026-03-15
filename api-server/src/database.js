@@ -666,6 +666,11 @@ class SQLiteAdapter {
       CREATE INDEX IF NOT EXISTS idx_task_history_agent ON task_assignment_history(agent_id);
     `);
 
+    // Add preferences column to users table if not exists
+    try {
+      this.db.exec(`ALTER TABLE users ADD COLUMN preferences TEXT DEFAULT '{}';`);
+    } catch (e) { /* column already exists */ }
+
     // ========== OPENCLAW: AGENT TYPE SYSTEM ==========
     // Add agent_type, current_mode, current_model, rnd fields to manager_agents
     const agentCols = [

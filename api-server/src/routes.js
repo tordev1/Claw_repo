@@ -4858,3 +4858,122 @@ async function getAgentNotificationsRoute(request, reply) {
 module.exports.linkMachineAgentRoute = linkMachineAgentRoute;
 module.exports.unlinkMachineAgentRoute = unlinkMachineAgentRoute;
 // Notifications - exported in module.exports above
+
+// ============================================================================
+// PROFILE & PREFERENCES ROUTES
+// ============================================================================
+
+// PATCH /api/auth/me — Update profile
+async function updateProfileRoute(request, reply) {
+  try {
+    const userId = request.user.id;
+    const { name, email } = request.body;
+    const db = getDb();
+
+    // Build dynamic update
+    const updates = [];
+    const values = [];
+
+    if (name !== undefined) {
+      if (!name || name.trim().length < 1) {
+        reply.code(400);
+        return { error: 'Name cannot be empty' };
+      }
+      updates.push('name = ?');
+      values.push(name.trim());
+    }
+
+    if (email !== undefined) {
+      if (email) {
+        // Check email uniqueness
+        const existing = db.prepare('SELECT id FROM users WHERE email = ? AND id != ?').get(email, userId);
+        if (existing) {
+          reply.code(409);
+          return { error: 'Email already in use' };
+        }
+      }
+      updates.push('email = ?');
+      values.push(email || null);
+    }
+
+    if (updates.length === 0) {
+      reply.code(400);
+      return { error: 'No fields to update' };
+    }
+
+    updates.push("updated_at = datetime('now')");
+    values.push(userId);
+
+    db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+
+    // Return updated user
+    const user = db.prepare('SELECT id, name, login, email, role, avatar_url, created_at FROM users WHERE id = ?').get(userId);
+
+    return { success: true, user };
+  } catch (err) {
+    console.error('Update profile error:', err);
+    reply.code(500);
+    return { error: 'Failed to update profile' };
+  }
+}
+
+// GET /api/user/preferences — Get preferences
+async function getPreferencesRoute(request, reply) {
+  try {
+    const db = getDb();
+    const user = db.prepare('SELECT preferences FROM users WHERE id = ?').get(request.user.id);
+
+    if (!user) {
+      reply.code(404);
+      return { error: 'User not found' };
+    }
+
+    const defaults = {
+      notify_tasks: true,
+      notify_messages: true,
+      notify_agents: false
+    };
+
+    let preferences = defaults;
+    try {
+      if (user.preferences) {
+        preferences = { ...defaults, ...JSON.parse(user.preferences) };
+      }
+    } catch (e) {
+      // Invalid JSON, use defaults
+    }
+
+    return { preferences };
+  } catch (err) {
+    console.error('Get preferences error:', err);
+    reply.code(500);
+    return { error: 'Failed to get preferences' };
+  }
+}
+
+// PUT /api/user/preferences — Save preferences
+async function updatePreferencesRoute(request, reply) {
+  try {
+    const db = getDb();
+    const { notify_tasks, notify_messages, notify_agents } = request.body;
+
+    const preferences = JSON.stringify({
+      notify_tasks: notify_tasks !== undefined ? Boolean(notify_tasks) : true,
+      notify_messages: notify_messages !== undefined ? Boolean(notify_messages) : true,
+      notify_agents: notify_agents !== undefined ? Boolean(notify_agents) : false
+    });
+
+    db.prepare("UPDATE users SET preferences = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(preferences, request.user.id);
+
+    return { success: true, preferences: JSON.parse(preferences) };
+  } catch (err) {
+    console.error('Update preferences error:', err);
+    reply.code(500);
+    return { error: 'Failed to save preferences' };
+  }
+}
+
+module.exports.updateProfileRoute = updateProfileRoute;
+module.exports.getPreferencesRoute = getPreferencesRoute;
+module.exports.updatePreferencesRoute = updatePreferencesRoute;

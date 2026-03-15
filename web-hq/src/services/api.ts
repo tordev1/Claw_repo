@@ -614,7 +614,7 @@ export const wsClient = new WebSocketClient();
 // Auth API
 export const authApi = {
   changePassword: (currentPassword: string, newPassword: string) =>
-    fetchApi('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),
+    fetchApi('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) }),
 
   login: async (credentials: { login: string; password: string } | string, password?: string) => {
     const login = typeof credentials === 'object' ? credentials.login : credentials;
@@ -697,6 +697,29 @@ export const projectAgentsApi = {
     fetchApi(`/api/projects/${projectId}/agents`),
   listByAgent: (agentId: string) =>
     fetchApi(`/api/agents/${agentId}/projects`),
+};
+
+// User Preferences
+export interface UserPreferences {
+  notify_tasks: boolean;
+  notify_messages: boolean;
+  notify_agents: boolean;
+}
+
+// User API
+export const userApi = {
+  updateProfile: (data: { name?: string; email?: string }) =>
+    fetchApi('/api/auth/me', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  getPreferences: (): Promise<{ preferences: UserPreferences }> =>
+    fetchApi('/api/user/preferences'),
+  updatePreferences: (prefs: UserPreferences): Promise<{ success: boolean; preferences: UserPreferences }> =>
+    fetchApi('/api/user/preferences', {
+      method: 'PUT',
+      body: JSON.stringify(prefs),
+    }),
 };
 
 // User session management

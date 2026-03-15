@@ -239,6 +239,23 @@ const recordTokenUsageSchema = z.object({
 });
 
 // ============================================================================
+// PROFILE & PREFERENCES SCHEMAS
+// ============================================================================
+
+const updateProfileSchema = z.object({
+  name: z.string().min(1, 'Name cannot be empty').max(255).optional(),
+  email: z.string().email('Invalid email format').max(255).optional().nullable(),
+}).refine(data => data.name !== undefined || data.email !== undefined, {
+  message: 'At least one field (name or email) must be provided'
+});
+
+const updatePreferencesSchema = z.object({
+  notify_tasks: z.boolean().optional().default(true),
+  notify_messages: z.boolean().optional().default(true),
+  notify_agents: z.boolean().optional().default(false),
+});
+
+// ============================================================================
 // EXPORTS
 // ============================================================================
 
@@ -261,4 +278,6 @@ module.exports = {
   updateAgentStatusSchema,
   editMessageSchema,
   recordTokenUsageSchema,
+  updateProfileSchema,
+  updatePreferencesSchema,
 };
