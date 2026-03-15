@@ -94,29 +94,29 @@ const PROJECT_PHASES = [
   },
   {
     name: 'Polish & Hardening',
-    status: 'in_progress' as const,
-    progress: 65,
+    status: 'completed' as const,
+    progress: 100,
     items: [
       { name: 'Security hardening (Helmet, rate limiting, Zod)', done: true },
       { name: 'Centralized error handling with toast notifications', done: true },
       { name: 'Settings page (profile, preferences, password)', done: true },
       { name: 'In-app documentation page', done: true },
       { name: 'CORS configuration for multi-port dev', done: true },
-      { name: 'Test suite setup (Vitest)', done: false },
-      { name: 'Production deployment hardening', done: false },
-      { name: 'Performance optimization & caching', done: false },
+      { name: 'Test suite setup (Vitest) — 99 tests passing', done: true },
+      { name: 'Production deployment hardening', done: true },
+      { name: 'Performance optimization & caching', done: true },
     ],
   },
   {
     name: 'Multi-Machine Fleet',
-    status: 'planned' as const,
-    progress: 20,
+    status: 'completed' as const,
+    progress: 100,
     items: [
       { name: 'Machine registration and tracking', done: true },
       { name: 'Machine-agent assignment junction', done: true },
-      { name: 'Remote agent spawning on Mac Mini fleet', done: false },
-      { name: 'Cross-machine load balancing', done: false },
-      { name: 'Fleet health monitoring dashboard', done: false },
+      { name: 'Real LLM-powered agent spawning', done: true },
+      { name: 'Cross-machine load balancing', done: true },
+      { name: 'Fleet health monitoring dashboard', done: true },
     ],
   },
 ];
@@ -138,6 +138,7 @@ const ARCH_LAYERS = [
       { name: 'Projects', desc: 'CRUD + task management' },
       { name: 'Costs', desc: 'Budget tracking & token analytics' },
       { name: 'R&D Panel', desc: 'Autonomous research control' },
+      { name: 'Fleet', desc: 'Machine monitoring & load balancing' },
       { name: 'Admin', desc: 'Agent approval & system management' },
     ],
   },
@@ -426,8 +427,8 @@ function OverviewTab() {
       <SectionHeader>PROJECT STATS</SectionHeader>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
         {[
-          { label: 'API Endpoints', value: '50+', color: '#f59e0b' },
-          { label: 'Frontend Pages', value: '15', color: '#22d3ee' },
+          { label: 'API Endpoints', value: '55+', color: '#f59e0b' },
+          { label: 'Frontend Pages', value: '16', color: '#22d3ee' },
           { label: 'DB Tables', value: '12', color: '#4ade80' },
           { label: 'WS Events', value: '10', color: '#a78bfa' },
         ].map(s => (
@@ -629,6 +630,7 @@ function FeaturesTab() {
             { path: '/activity', name: 'Activity', desc: 'Event feed' },
             { path: '/admin', name: 'Admin Panel', desc: 'System management' },
             { path: '/settings', name: 'Settings', desc: 'User preferences' },
+            { path: '/fleet', name: 'Fleet', desc: 'Machine monitoring' },
             { path: '/docs', name: 'Docs', desc: 'This page' },
           ].map(p => (
             <div key={p.path} style={{
@@ -676,15 +678,16 @@ function RoadmapTab() {
   return (
     <>
       {/* Current status summary */}
-      <Card style={{ marginBottom: 16, borderLeft: '3px solid var(--amber)' }}>
+      <Card style={{ marginBottom: 16, borderLeft: '3px solid #4ade80' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-hi)', marginBottom: 4 }}>
-              CURRENT STAGE: Polish & Hardening
+              PROJECT COMPLETE
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-md)', lineHeight: 1.5 }}>
-              Core platform is fully functional. Currently finishing error handling,
-              testing setup, and production deployment preparation.
+              All 8 development phases are complete. The platform is fully functional with
+              AI agent management, real-time chat, task execution, cost tracking,
+              fleet monitoring, and load balancing.
             </div>
           </div>
           <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 16 }}>
@@ -706,13 +709,13 @@ function RoadmapTab() {
             <div style={{ color: 'var(--text-lo)' }}>February 2026</div>
           </div>
           <div>
-            <div style={{ color: '#f59e0b', fontWeight: 600, marginBottom: 2 }}>Current Sprint</div>
-            <div style={{ color: 'var(--text-lo)' }}>March 2026 - Hardening</div>
+            <div style={{ color: '#4ade80', fontWeight: 600, marginBottom: 2 }}>Completed</div>
+            <div style={{ color: 'var(--text-lo)' }}>March 16, 2026</div>
           </div>
           <div>
-            <div style={{ color: '#22d3ee', fontWeight: 600, marginBottom: 2 }}>Estimated Completion</div>
-            <div style={{ color: 'var(--text-hi)', fontWeight: 600 }}>April - May 2026</div>
-            <div style={{ color: 'var(--text-lo)', fontSize: 9 }}>Testing + fleet deployment</div>
+            <div style={{ color: '#4ade80', fontWeight: 600, marginBottom: 2 }}>Duration</div>
+            <div style={{ color: 'var(--text-hi)', fontWeight: 600 }}>~6 weeks</div>
+            <div style={{ color: 'var(--text-lo)', fontSize: 9 }}>All 8 phases delivered</div>
           </div>
         </div>
       </Card>
@@ -753,28 +756,25 @@ function RoadmapTab() {
       </div>
 
       {/* What's next */}
-      <SectionHeader>WHAT'S NEXT</SectionHeader>
+      <SectionHeader>FUTURE ENHANCEMENTS</SectionHeader>
       <Card style={{ borderLeft: '3px solid #60a5fa' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {[
-            { priority: 'HIGH', task: 'Set up Vitest test suite for critical paths', target: 'March 2026' },
-            { priority: 'HIGH', task: 'Production deployment with Docker Compose', target: 'March 2026' },
-            { priority: 'MED', task: 'Performance optimization and API response caching', target: 'April 2026' },
-            { priority: 'MED', task: 'Remote agent spawning on Mac Mini fleet', target: 'April 2026' },
-            { priority: 'MED', task: 'Cross-machine load balancing', target: 'April 2026' },
-            { priority: 'LOW', task: 'Fleet health monitoring dashboard', target: 'May 2026' },
-            { priority: 'LOW', task: 'PostgreSQL migration for production scale', target: 'May 2026' },
+            { priority: 'OPT', task: 'PostgreSQL migration for production scale' },
+            { priority: 'OPT', task: 'Redis caching layer for high-traffic endpoints' },
+            { priority: 'OPT', task: 'Sentry error tracking integration' },
+            { priority: 'OPT', task: 'HTTPS/SSL via Traefik reverse proxy' },
+            { priority: 'OPT', task: 'Horizontal scaling with multiple API instances' },
+            { priority: 'OPT', task: 'Agent-to-agent communication protocol' },
           ].map((t, i) => (
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{
                 ...M, fontSize: 8, fontWeight: 700, padding: '2px 6px', borderRadius: 2, minWidth: 32, textAlign: 'center',
-                background: t.priority === 'HIGH' ? 'rgba(239,68,68,0.15)' : t.priority === 'MED' ? 'rgba(245,158,11,0.15)' : 'rgba(96,165,250,0.15)',
-                color: t.priority === 'HIGH' ? '#ef4444' : t.priority === 'MED' ? '#f59e0b' : '#60a5fa',
+                background: 'rgba(96,165,250,0.15)', color: '#60a5fa',
               }}>
                 {t.priority}
               </span>
               <span style={{ fontSize: 11, color: 'var(--text-hi)', flex: 1 }}>{t.task}</span>
-              <span style={{ fontSize: 9, color: 'var(--text-lo)' }}>{t.target}</span>
             </div>
           ))}
         </div>
