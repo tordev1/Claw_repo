@@ -1,31 +1,43 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Layout from './components/Layout';
 import Login from './components/Login';
-import Dashboard from './pages/Dashboard';
-import Projects from './pages/Projects';
-import ProjectDetail from './pages/ProjectDetail';
-import Tasks from './pages/Tasks';
-import TaskDetail from './pages/TaskDetail';
-import Costs from './pages/Costs';
-import TokenDashboard from './pages/TokenDashboard';
 import { ToastContainer, toast } from './components/Toast';
 import ErrorBoundary from './components/ErrorBoundary';
-import NewProject from './pages/NewProject';
-import Activity from './pages/Activity';
-import Settings from './pages/Settings';
-import Chat from './pages/Chat';
-import Register from './pages/Register';
-import AdminPanel from './pages/AdminPanel';
-import Agents from './pages/Agents';
-import AgentRegistration from './pages/AgentRegistration';
-import AgentDetail from './pages/AgentDetail';
-import HQ from './pages/HQ';
-import RndPanel from './pages/RndPanel';
-import ProjectAssignmentBoard from './pages/ProjectAssignmentBoard';
-import Docs from './pages/Docs';
 import { userSession, wsClient } from './services/api';
 import { useChatStore } from './store/chatStore';
+
+// Lazy-loaded pages — only downloaded when navigated to
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Projects = lazy(() => import('./pages/Projects'));
+const ProjectDetail = lazy(() => import('./pages/ProjectDetail'));
+const Tasks = lazy(() => import('./pages/Tasks'));
+const TaskDetail = lazy(() => import('./pages/TaskDetail'));
+const Costs = lazy(() => import('./pages/Costs'));
+const TokenDashboard = lazy(() => import('./pages/TokenDashboard'));
+const NewProject = lazy(() => import('./pages/NewProject'));
+const Activity = lazy(() => import('./pages/Activity'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Chat = lazy(() => import('./pages/Chat'));
+const Register = lazy(() => import('./pages/Register'));
+const AdminPanel = lazy(() => import('./pages/AdminPanel'));
+const Agents = lazy(() => import('./pages/Agents'));
+const AgentRegistration = lazy(() => import('./pages/AgentRegistration'));
+const AgentDetail = lazy(() => import('./pages/AgentDetail'));
+const HQ = lazy(() => import('./pages/HQ'));
+const RndPanel = lazy(() => import('./pages/RndPanel'));
+const ProjectAssignmentBoard = lazy(() => import('./pages/ProjectAssignmentBoard'));
+const Docs = lazy(() => import('./pages/Docs'));
+
+function PageLoader() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '50vh' }}>
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-lo)', letterSpacing: '0.1em' }}>
+        LOADING...
+      </span>
+    </div>
+  );
+}
 
 interface User {
   id: string;
@@ -199,51 +211,53 @@ function App() {
         <WebSocketManager userId={user.id} />
 
       <Layout user={user} onLogout={handleLogout}>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/projects" element={<Projects />} />
-          <Route path="/projects/:id" element={<ProjectDetail />} />
-          <Route
-            path="/new-project"
-            element={
-              <ReadOnlyRedirect user={user}>
-                <NewProject />
-              </ReadOnlyRedirect>
-            }
-          />
-          <Route path="/tasks" element={<Tasks />} />
-          <Route path="/tasks/:id" element={<TaskDetail />} />
-          <Route path="/costs" element={<Costs />} />
-          <Route path="/tokens" element={<TokenDashboard />} />
-          <Route path="/activity" element={<Activity />} />
-          <Route path="/chat" element={<Chat currentUser={user} />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/agents" element={<Agents />} />
-          <Route path="/agents/register" element={<AgentRegistration />} />
-          <Route path="/agents/:id" element={<AgentDetail />} />
-          <Route path="/hq" element={<HQ />} />
-          <Route path="/assign" element={<ProjectAssignmentBoard />} />
-          <Route path="/docs" element={<Docs />} />
-          <Route
-            path="/rnd"
-            element={
-              <ProtectedRoute user={user}>
-                <RndPanel />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin"
-            element={
-              <ProtectedRoute user={user} requiredRole="admin">
-                <AdminPanel />
-              </ProtectedRoute>
-            }
-          />
-          <Route path="/login" element={<Navigate to="/" replace />} />
-          <Route path="/register" element={<Navigate to="/" replace />} />
-          <Route path="*" element={<Navigate to="/" />} />
-        </Routes>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/projects" element={<Projects />} />
+            <Route path="/projects/:id" element={<ProjectDetail />} />
+            <Route
+              path="/new-project"
+              element={
+                <ReadOnlyRedirect user={user}>
+                  <NewProject />
+                </ReadOnlyRedirect>
+              }
+            />
+            <Route path="/tasks" element={<Tasks />} />
+            <Route path="/tasks/:id" element={<TaskDetail />} />
+            <Route path="/costs" element={<Costs />} />
+            <Route path="/tokens" element={<TokenDashboard />} />
+            <Route path="/activity" element={<Activity />} />
+            <Route path="/chat" element={<Chat currentUser={user} />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/agents" element={<Agents />} />
+            <Route path="/agents/register" element={<AgentRegistration />} />
+            <Route path="/agents/:id" element={<AgentDetail />} />
+            <Route path="/hq" element={<HQ />} />
+            <Route path="/assign" element={<ProjectAssignmentBoard />} />
+            <Route path="/docs" element={<Docs />} />
+            <Route
+              path="/rnd"
+              element={
+                <ProtectedRoute user={user}>
+                  <RndPanel />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin"
+              element={
+                <ProtectedRoute user={user} requiredRole="admin">
+                  <AdminPanel />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="/login" element={<Navigate to="/" replace />} />
+            <Route path="/register" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<Navigate to="/" />} />
+          </Routes>
+        </Suspense>
       </Layout>
       </BrowserRouter>
     </ErrorBoundary>

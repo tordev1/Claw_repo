@@ -4,6 +4,27 @@
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3001/ws';
 
+// ── Simple GET response cache with TTL ──────────────────────────────────────
+const _cache = new Map<string, { data: any; expires: number }>();
+const DEFAULT_TTL = 15_000; // 15 seconds
+
+export function cachedFetch(endpoint: string, ttl = DEFAULT_TTL): Promise<any> {
+  const now = Date.now();
+  const cached = _cache.get(endpoint);
+  if (cached && cached.expires > now) return Promise.resolve(cached.data);
+  return fetchApi(endpoint).then(data => {
+    _cache.set(endpoint, { data, expires: now + ttl });
+    return data;
+  });
+}
+
+export function invalidateCache(pattern?: string) {
+  if (!pattern) { _cache.clear(); return; }
+  for (const key of _cache.keys()) {
+    if (key.includes(pattern)) _cache.delete(key);
+  }
+}
+
 // Generic fetch wrapper with error handling
 export async function fetchApi(endpoint: string, options?: RequestInit) {
   const url = `${API_BASE}${endpoint}`;
@@ -74,10 +95,11 @@ export async function fetchApi(endpoint: string, options?: RequestInit) {
 export const projectsApi = {
   list: (params?: { status?: string; limit?: number; offset?: number }) => {
     const query = new URLSearchParams(params as Record<string, string>).toString();
-    return fetchApi(`/api/projects${query ? `?${query}` : ''}`);
+    const endpoint = `/api/projects${query ? `?${query}` : ''}`;
+    return cachedFetch(endpoint);
   },
 
-  get: (id: string) => fetchApi(`/api/projects/${id}`),
+  get: (id: string) => cachedFetch(`/api/projects/${id}`),
 
   create: (data: { name: string; description?: string; config?: object }) =>
     fetchApi('/api/projects', { method: 'POST', body: JSON.stringify(data) }),
@@ -326,8 +348,8 @@ export const healthApi = {
 
 // Machines API
 export const machinesApi = {
-  list: () => fetchApi('/api/machines'),
-  get: (id: string) => fetchApi(`/api/machines/${id}`),
+  list: () => cachedFetch('/api/machines'),
+  get: (id: string) => cachedFetch(`/api/machines/${id}`),
   delete: (id: string) => fetchApi(`/api/machines/${id}`, { method: 'DELETE' }),
 };
 
@@ -400,9 +422,9 @@ export const agentsApi = {
     fetchApi('/api/agents/register', { method: 'POST', body: JSON.stringify(data) }),
   list: (params?: { status?: string; role?: string }) => {
     const query = new URLSearchParams(params as Record<string, string>).toString();
-    return fetchApi(`/api/agents${query ? `?${query}` : ''}`);
+    return cachedFetch(`/api/agents${query ? `?${query}` : ''}`);
   },
-  getById: (id: string) => fetchApi(`/api/agents/${id}`),
+  getById: (id: string) => cachedFetch(`/api/agents/${id}`),
   updateStatus: (id: string, status: string) =>
     fetchApi(`/api/agents/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
   approve: (id: string) => fetchApi(`/api/agents/${id}/approve`, { method: 'POST' }),

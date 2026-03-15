@@ -141,20 +141,41 @@ const config = {
 
 // Validate critical configuration
 function validateConfig() {
+  const warnings = [];
   const errors = [];
 
   if (isProduction) {
-    // In production, ensure CORS is properly configured
-    if (config.CORS_ORIGINS.includes('*')) {
-      console.warn('⚠️  WARNING: CORS_ORIGIN is set to "*" in production. This is insecure.');
+    // Fatal: JWT_SECRET is required in production
+    if (!config.jwtSecret) {
+      errors.push('JWT_SECRET must be set in production. Authentication will not work without it.');
     }
 
-    // Warn if JWT_SECRET is not set
-    if (!config.jwtSecret) {
-      console.warn('⚠️  WARNING: JWT_SECRET is not set. Authentication features are disabled.');
+    // Fatal: CORS wildcard in production
+    if (config.CORS_ORIGINS.includes('*')) {
+      errors.push('CORS_ORIGIN is set to "*" in production. This is insecure — set specific origins.');
+    }
+
+    // Warning: default DB path in production
+    if (config.DB_PATH === './data/project-claw.db' && config.DB_TYPE === 'sqlite') {
+      warnings.push('Using default SQLite path in production. Consider setting DB_PATH or switching to PostgreSQL.');
     }
   }
 
+  // Always validate
+  if (config.PORT < 1 || config.PORT > 65535) {
+    errors.push(`PORT ${config.PORT} is out of range (1-65535).`);
+  }
+
+  if (config.RATE_LIMIT_MAX < 1) {
+    errors.push('RATE_LIMIT_MAX must be at least 1.');
+  }
+
+  // Print warnings
+  for (const w of warnings) {
+    console.warn(`⚠️  WARNING: ${w}`);
+  }
+
+  // Print errors and exit
   if (errors.length > 0) {
     console.error('❌ Configuration errors:');
     errors.forEach(err => console.error(`  - ${err}`));
