@@ -6,7 +6,7 @@
 const path = require('path');
 
 // Environment detection
-const NODE_ENV = process.env.NODE_ENV || 'development';
+const NODE_ENV = (process.env.NODE_ENV || 'development').trim();
 const isProduction = NODE_ENV === 'production';
 const isDevelopment = NODE_ENV === 'development';
 
@@ -19,9 +19,11 @@ function parseCorsOrigins() {
     if (isDevelopment) {
       return [
         'http://localhost:5173',
+        'http://localhost:5174',
         'http://localhost:3000',
         'http://localhost:80',
         'http://127.0.0.1:5173',
+        'http://127.0.0.1:5174',
         'http://127.0.0.1:3000'
       ];
     }

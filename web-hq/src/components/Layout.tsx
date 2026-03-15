@@ -125,18 +125,16 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
           Settings
         </Link>
 
-        <a
-          href={import.meta.env.VITE_DOCS_URL || 'http://localhost:4040'}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="ops-nav-item"
+        <Link
+          to="/docs"
+          className={`ops-nav-item ${location.pathname === '/docs' ? 'active' : ''}`}
           style={{ color: 'var(--cyan)', opacity: 0.7 }}
           onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
           onMouseLeave={e => (e.currentTarget.style.opacity = '0.7')}
         >
           <BookOpen size={12} strokeWidth={1.5} />
           Docs
-        </a>
+        </Link>
 
         {user && (
           <div style={{
