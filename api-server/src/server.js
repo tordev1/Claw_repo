@@ -355,7 +355,9 @@ async function buildServer() {
   // MACHINE ROUTES
   // ============================================================================
   fastify.get('/api/machines', { preHandler: authMiddleware }, routes.listMachinesRoute);
+  fastify.get('/api/machines/health', { preHandler: authMiddleware }, routes.fleetHealthRoute);
   fastify.post('/api/machines/register', { preHandler: validate(registerMachineSchema) }, routes.registerMachineRoute);
+  fastify.post('/api/machines/assign-agent', { preHandler: authMiddleware }, routes.autoAssignAgentRoute);
   fastify.delete('/api/machines/:id', { preHandler: authMiddleware }, routes.deleteMachineRoute);
   fastify.post('/api/machines/:machineId/agents/:agentId', { preHandler: authMiddleware }, routes.linkMachineAgentRoute);
   fastify.delete('/api/machines/:machineId/agents/:agentId', { preHandler: authMiddleware }, routes.unlinkMachineAgentRoute);

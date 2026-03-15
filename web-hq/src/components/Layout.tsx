@@ -4,7 +4,7 @@ import {
   LayoutDashboard, FolderKanban, CheckSquare, DollarSign,
   Activity, Settings, MessageSquare, Bot, Menu, X,
   LogOut, ChevronRight, Shield, Coins, UserPlus, Radio, Shuffle,
-  Zap, BookOpen, FlaskConical
+  Zap, BookOpen, FlaskConical, Server
 } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 
@@ -22,6 +22,7 @@ const NAV = [
   { path: '/agents',  icon: Bot,             label: 'Agents',    group: 'main' },
   { path: '/chat',    icon: MessageSquare,   label: 'Comms',     group: 'main' },
   { path: '/assign',  icon: Shuffle,         label: 'Assign',    group: 'main' },
+  { path: '/fleet',   icon: Server,          label: 'Fleet',     group: 'ops' },
   { path: '/rnd',     icon: FlaskConical,    label: 'R&D Lab',   group: 'ops' },
   { path: '/costs',   icon: DollarSign,      label: 'Costs',     group: 'ops' },
   { path: '/tokens',  icon: Coins,           label: 'Tokens',    group: 'ops' },

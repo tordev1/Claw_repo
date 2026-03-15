@@ -351,6 +351,13 @@ export const machinesApi = {
   list: () => cachedFetch('/api/machines'),
   get: (id: string) => cachedFetch(`/api/machines/${id}`),
   delete: (id: string) => fetchApi(`/api/machines/${id}`, { method: 'DELETE' }),
+  health: () => cachedFetch('/api/machines/health', 10_000),
+  autoAssign: (agentId: string) =>
+    fetchApi('/api/machines/assign-agent', { method: 'POST', body: JSON.stringify({ agent_id: agentId }) }),
+  linkAgent: (machineId: string, agentId: string) =>
+    fetchApi(`/api/machines/${machineId}/agents/${agentId}`, { method: 'POST' }),
+  unlinkAgent: (machineId: string, agentId: string) =>
+    fetchApi(`/api/machines/${machineId}/agents/${agentId}`, { method: 'DELETE' }),
 };
 
 // Preset types

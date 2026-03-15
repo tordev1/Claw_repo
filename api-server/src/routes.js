@@ -4005,6 +4005,138 @@ async function deleteMachineRoute(request, reply) {
   return { id, deleted: true };
 }
 
+// GET /api/machines/health - Fleet health overview with load balancing info
+async function fleetHealthRoute(request, reply) {
+  try {
+    const db = getDb();
+    const now = Date.now();
+    const machines = db.prepare('SELECT * FROM machines ORDER BY last_seen DESC').all();
+
+    const fleet = machines.map(m => {
+      const agents = db.prepare(`
+        SELECT ma.agent_id, ma.started_at, ma.status as link_status,
+          mg.name as agent_name, mg.handle, mg.status as agent_status, mg.agent_type
+        FROM machine_agents ma
+        LEFT JOIN manager_agents mg ON ma.agent_id = mg.id
+        WHERE ma.machine_id = ? AND ma.status = 'running'
+      `).all(m.id);
+
+      const lastSeenMs = m.last_seen ? now - new Date(m.last_seen).getTime() : Infinity;
+      const health = lastSeenMs < 5 * 60000 ? 'online' : lastSeenMs < 30 * 60000 ? 'idle' : 'offline';
+      const metadata = JSON.parse(m.metadata || '{}');
+
+      return {
+        id: m.id,
+        hostname: m.hostname,
+        ip_address: m.ip_address,
+        status: m.status,
+        health,
+        last_seen: m.last_seen,
+        last_seen_ago_ms: lastSeenMs === Infinity ? null : lastSeenMs,
+        metadata,
+        agents_running: agents.length,
+        capacity: metadata.max_agents || 5,
+        load_pct: Math.round((agents.length / (metadata.max_agents || 5)) * 100),
+        agents,
+        created_at: m.created_at,
+      };
+    });
+
+    const online = fleet.filter(m => m.health === 'online');
+    const totalCapacity = fleet.reduce((s, m) => s + m.capacity, 0);
+    const totalRunning = fleet.reduce((s, m) => s + m.agents_running, 0);
+
+    return {
+      fleet,
+      summary: {
+        total_machines: fleet.length,
+        online: online.length,
+        idle: fleet.filter(m => m.health === 'idle').length,
+        offline: fleet.filter(m => m.health === 'offline').length,
+        total_agents_running: totalRunning,
+        total_capacity: totalCapacity,
+        fleet_load_pct: totalCapacity > 0 ? Math.round((totalRunning / totalCapacity) * 100) : 0,
+      },
+    };
+  } catch (err) {
+    reply.code(500);
+    return { error: err.message };
+  }
+}
+
+// POST /api/machines/assign-agent - Auto-assign agent to least-loaded machine
+async function autoAssignAgentRoute(request, reply) {
+  try {
+    const db = getDb();
+    const { agent_id } = request.body;
+    if (!agent_id) { reply.code(400); return { error: 'agent_id is required' }; }
+
+    const agent = db.prepare('SELECT * FROM manager_agents WHERE id = ?').get(agent_id);
+    if (!agent) { reply.code(404); return { error: 'Agent not found' }; }
+
+    // Check if agent is already running on a machine
+    const existing = db.prepare(
+      "SELECT ma.*, m.hostname FROM machine_agents ma JOIN machines m ON ma.machine_id = m.id WHERE ma.agent_id = ? AND ma.status = 'running'"
+    ).get(agent_id);
+    if (existing) {
+      return { assigned: true, already_running: true, machine_id: existing.machine_id, hostname: existing.hostname };
+    }
+
+    // Get all online machines with agent counts
+    const now = Date.now();
+    const machines = db.prepare('SELECT * FROM machines WHERE status = ?').all('active');
+
+    const candidates = machines
+      .map(m => {
+        const lastSeenMs = m.last_seen ? now - new Date(m.last_seen).getTime() : Infinity;
+        if (lastSeenMs > 30 * 60000) return null; // skip offline machines
+        const runningCount = db.prepare(
+          "SELECT COUNT(*) as cnt FROM machine_agents WHERE machine_id = ? AND status = 'running'"
+        ).get(m.id).cnt;
+        const maxAgents = JSON.parse(m.metadata || '{}').max_agents || 5;
+        return { ...m, running: runningCount, max: maxAgents, available: maxAgents - runningCount };
+      })
+      .filter(m => m && m.available > 0)
+      .sort((a, b) => {
+        // Sort by: lowest load percentage, then most available slots
+        const loadA = a.running / a.max;
+        const loadB = b.running / b.max;
+        if (loadA !== loadB) return loadA - loadB;
+        return b.available - a.available;
+      });
+
+    if (candidates.length === 0) {
+      reply.code(503);
+      return { error: 'No machines available with capacity. All machines are offline or at capacity.' };
+    }
+
+    const target = candidates[0];
+    const linkId = generateId();
+    const nowIso = new Date().toISOString();
+
+    // Stop any previous assignments
+    db.prepare("UPDATE machine_agents SET status = 'stopped', stopped_at = ? WHERE agent_id = ? AND status = 'running'")
+      .run(nowIso, agent_id);
+
+    // Assign to least-loaded machine
+    db.prepare('INSERT INTO machine_agents (id, machine_id, agent_id, started_at, status) VALUES (?, ?, ?, ?, ?)')
+      .run(linkId, target.id, agent_id, nowIso, 'running');
+
+    return {
+      assigned: true,
+      machine_id: target.id,
+      hostname: target.hostname,
+      ip_address: target.ip_address,
+      agent_id,
+      agent_name: agent.name,
+      machine_load: `${target.running + 1}/${target.max}`,
+    };
+  } catch (err) {
+    reply.code(500);
+    return { error: err.message };
+  }
+}
+
 // ============================================================================
 // TOKEN DASHBOARD ROUTES
 // ============================================================================
@@ -4674,6 +4806,8 @@ module.exports = {
   registerMachineRoute,
   listMachinesRoute,
   deleteMachineRoute,
+  fleetHealthRoute,
+  autoAssignAgentRoute,
 
   // Project Assignment (Phase 2)
   assignAgentToProjectRouteV2,
