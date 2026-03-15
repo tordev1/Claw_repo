@@ -1,5 +1,8 @@
 # PROJECT-CLAW Production Docker Compose
-# Production overrides and additional services
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile ssl up -d
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile redis --profile postgres up -d
 
 version: '3.8'
 
@@ -7,6 +10,9 @@ services:
   # Backend API Server - Production
   api:
     restart: always
+    environment:
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - SENTRY_DSN=${SENTRY_DSN}
     deploy:
       resources:
         limits:
@@ -15,12 +21,23 @@ services:
         reservations:
           cpus: '0.25'
           memory: 128M
+      # Horizontal scaling: run multiple API instances behind Traefik
+      # Requires: PostgreSQL (not SQLite) + Redis for shared state
+      # docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile postgres --profile redis up -d --scale api=3
+      replicas: 1
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=PathPrefix(`/api`) || PathPrefix(`/ws`) || PathPrefix(`/health`)"
+      - "traefik.http.routers.api.entrypoints=websecure"
+      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.api.loadbalancer.server.port=3001"
+      - "traefik.http.services.api.loadbalancer.sticky.cookie=true"
+      - "traefik.http.services.api.loadbalancer.sticky.cookie.name=claw_instance"
     healthcheck:
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
-    # Production logging
     logging:
       driver: "json-file"
       options:
@@ -30,6 +47,12 @@ services:
   # Frontend Web HQ - Production
   web:
     restart: always
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.web.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.web.entrypoints=websecure"
+      - "traefik.http.routers.web.tls.certresolver=letsencrypt"
+      - "traefik.http.services.web.loadbalancer.server.port=80"
     deploy:
       resources:
         limits:
@@ -49,69 +72,78 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Optional: Automated Database Backups
-  # Uncomment to enable hourly backups
-  # db-backup:
-  #   image: alpine:latest
-  #   container_name: claw-db-backup
-  #   volumes:
-  #     - api-data:/data:ro
-  #     - ./backups:/backups
-  #   command: >
-  #     sh -c "
-  #       apk add --no-cache sqlite;
-  #       while true; do
-  #         sleep 3600;
-  #         cp /data/project-claw.db /backups/backup-$$(date +%Y%m%d-%H%M%S).db;
-  #         find /backups -name 'backup-*.db' -mtime +7 -delete;
-  #       done
-  #     "
-  #   restart: unless-stopped
-  #   profiles:
-  #     - backup
+  # Redis — rate limiting, API cache, WebSocket pub/sub for horizontal scaling
+  redis:
+    image: redis:7-alpine
+    container_name: claw-redis
+    restart: always
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    networks:
+      - claw-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - redis
 
-  # Optional: Reverse Proxy with SSL (Let's Encrypt)
-  # Use this instead of direct nginx if you need SSL
-  # traefik:
-  #   image: traefik:v3.0
-  #   container_name: claw-traefik
-  #   command:
-  #     - "--api.insecure=true"
-  #     - "--providers.docker=true"
-  #     - "--providers.docker.exposedbydefault=false"
-  #     - "--entrypoints.websecure.address=:443"
-  #     - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
-  #     - "--certificatesresolvers.letsencrypt.acme.email=your-email@example.com"
-  #     - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
-  #   ports:
-  #     - "443:443"
-  #   volumes:
-  #     - /var/run/docker.sock:/var/run/docker.sock:ro
-  #     - ./letsencrypt:/letsencrypt
-  #   networks:
-  #     - claw-network
-  #   profiles:
-  #     - ssl
+  # Traefik — reverse proxy with automatic HTTPS/SSL via Let's Encrypt
+  traefik:
+    image: traefik:v3.0
+    container_name: claw-traefik
+    restart: always
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-admin@project-claw.local}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-certs:/letsencrypt
+    networks:
+      - claw-network
+    profiles:
+      - ssl
 
-  # Optional: Redis for caching (future enhancement)
-  # redis:
-  #   image: redis:7-alpine
-  #   container_name: claw-redis
-  #   restart: always
-  #   volumes:
-  #     - redis-data:/data
-  #   networks:
-  #     - claw-network
-  #   profiles:
-  #     - cache
+  # Automated database backups (SQLite)
+  db-backup:
+    image: alpine:latest
+    container_name: claw-db-backup
+    volumes:
+      - api-data:/data:ro
+      - ./backups:/backups
+    command: >
+      sh -c "
+        apk add --no-cache sqlite;
+        while true; do
+          sleep 3600;
+          cp /data/project-claw.db /backups/backup-$$(date +%Y%m%d-%H%M%S).db;
+          find /backups -name 'backup-*.db' -mtime +7 -delete;
+        done
+      "
+    restart: unless-stopped
+    profiles:
+      - backup
 
 volumes:
   api-data:
     driver: local
-  # redis-data:
-  #   driver: local
+  redis-data:
+    driver: local
+  traefik-certs:
+    driver: local
 
-# Production network configuration
 networks:
   claw-network:
     driver: bridge

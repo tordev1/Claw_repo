@@ -40,6 +40,9 @@ const {
 } = require('./validators');
 const authRoutes = require('./auth.routes');
 
+const { initSentry, sentryErrorHandler, flushSentry } = require('./sentry');
+const { initRedis, initSubscriber, closeRedis, getRateLimitStore, publish } = require('./redis');
+
 const PORT = config.PORT;
 const HOST = config.HOST;
 const NODE_ENV = config.NODE_ENV;
@@ -48,6 +51,12 @@ const NODE_ENV = config.NODE_ENV;
 const SERVER_START_TIME = Date.now();
 
 async function buildServer() {
+  // Initialize Sentry error tracking (optional — needs SENTRY_DSN)
+  initSentry();
+
+  // Initialize Redis (optional — needs REDIS_URL)
+  await initRedis();
+
   // Initialize database
   await initDatabase();
 
@@ -63,8 +72,8 @@ async function buildServer() {
     crossOriginResourcePolicy: { policy: 'cross-origin' },
   });
 
-  // Register rate limiting
-  await fastify.register(rateLimit, {
+  // Register rate limiting (uses Redis store if available, else in-memory)
+  const rateLimitOpts = {
     max: config.RATE_LIMIT_MAX,
     timeWindow: config.RATE_LIMIT_WINDOW,
     keyGenerator: (req) => req.ip,
@@ -73,8 +82,14 @@ async function buildServer() {
       error: 'Too Many Requests',
       message: `Rate limit exceeded. Try again in ${context.after}`,
       retryAfter: context.after
-    })
-  });
+    }),
+  };
+  const redisStore = getRateLimitStore();
+  if (redisStore) {
+    rateLimitOpts.redis = redisStore.client;
+    console.log('[rate-limit] Using Redis store');
+  }
+  await fastify.register(rateLimit, rateLimitOpts);
 
   // Register CORS
   await fastify.register(cors, {
@@ -113,6 +128,7 @@ async function buildServer() {
   // Global error handler — sanitize errors in production
   fastify.setErrorHandler(function (error, request, reply) {
     logError('unhandled', error, request);
+    sentryErrorHandler(error, request, reply);
 
     const statusCode = error.statusCode || 500;
     reply.code(statusCode).send({
@@ -453,6 +469,7 @@ async function buildServer() {
   // MANAGER AGENT ROUTES (NEW)
   // ============================================================================
   fastify.get('/api/agents', { preHandler: authMiddleware }, routes.listManagerAgentsRoute);
+  fastify.get('/api/agents/directory', { preHandler: authMiddleware }, routes.agentDirectoryRoute);
   fastify.get('/api/agents/chat', { preHandler: authMiddleware }, routes.getAgentsForChatRoute);
   fastify.get('/api/agents/:id', { preHandler: optionalAuthMiddleware }, routes.getManagerAgentRoute);
   fastify.post('/api/agents/register', { preHandler: validate(registerAgentSchema) }, routes.registerManagerAgentRoute);
@@ -469,6 +486,7 @@ async function buildServer() {
   fastify.post('/api/agents/:id/heartbeat', { preHandler: optionalAuthMiddleware }, routes.agentHeartbeatRoute);
   fastify.get('/api/agents/:id/notifications', { preHandler: authMiddleware }, routes.getAgentNotificationsRoute);
   fastify.post('/api/agents/:id/notifications/:notificationId/read', { preHandler: authMiddleware }, routes.markAgentNotificationReadRoute);
+  fastify.post('/api/agents/:id/message', { preHandler: authMiddleware }, routes.agentMessageRoute);
 
   // User notifications
   fastify.get('/api/notifications', { preHandler: authMiddleware }, routes.getNotificationsRoute);
@@ -753,6 +771,11 @@ async function start() {
     // ── R&D autonomous agent scheduler ────────────────────────────────────────
     const { startRndScheduler } = require('./rnd-scheduler');
     startRndScheduler(wsManager);
+
+    // ── Redis pub/sub for cross-instance WS broadcasting ─────────────────────
+    await initSubscriber(({ event, data, filters }) => {
+      wsManager.broadcast(event, data, filters || {});
+    });
     // ──────────────────────────────────────────────────────────────────────────
 
     console.log(`🚀 PROJECT-CLAW API Server v1.2.0 running at http://${HOST}:${PORT}`);
@@ -852,6 +875,11 @@ async function gracefulShutdown(signal) {
   try {
     await fastify.close();
     console.log('✅ HTTP server closed');
+
+    await closeRedis();
+    console.log('✅ Redis connections closed');
+
+    await flushSentry();
 
     const db = getDb();
     db.close();

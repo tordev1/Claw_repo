@@ -5273,4 +5273,104 @@ module.exports.getRndStatusRoute = getRndStatusRoute;
 module.exports.executeRndRoute = executeRndRoute;
 module.exports.updateRndScheduleRoute = updateRndScheduleRoute;
 module.exports.getRndFindingsRoute = getRndFindingsRoute;
+
+// ============================================================================
+// AGENT-TO-AGENT COMMUNICATION
+// ============================================================================
+
+// GET /api/agents/directory - Discover other agents for communication
+async function agentDirectoryRoute(request, reply) {
+  try {
+    const db = getDb();
+    const agents = db.prepare(`
+      SELECT id, name, handle, agent_type, status, current_mode, current_model, project_id, rnd_division
+      FROM manager_agents WHERE is_approved = 1
+      ORDER BY status DESC, name ASC
+    `).all();
+
+    return {
+      agents: agents.map(a => ({
+        id: a.id,
+        name: a.name,
+        handle: a.handle,
+        type: a.agent_type,
+        status: a.status,
+        mode: a.current_mode,
+        project_id: a.project_id,
+        division: a.rnd_division,
+        available: a.status === 'online',
+      })),
+      count: agents.length,
+      online: agents.filter(a => a.status === 'online').length,
+    };
+  } catch (err) {
+    reply.code(500);
+    return { error: err.message };
+  }
+}
+
+// POST /api/agents/:id/message - Send agent-to-agent or user-to-agent message
+async function agentMessageRoute(request, reply) {
+  try {
+    const db = getDb();
+    const { id } = request.params;
+    const { content, sender_agent_id } = request.body || {};
+
+    if (!content) { reply.code(400); return { error: 'content is required' }; }
+
+    const target = db.prepare('SELECT * FROM manager_agents WHERE id = ? AND is_approved = 1').get(id);
+    if (!target) { reply.code(404); return { error: 'Target agent not found' }; }
+
+    // Determine sender info
+    let senderName, senderType, senderId;
+    if (sender_agent_id) {
+      const sender = db.prepare('SELECT * FROM manager_agents WHERE id = ?').get(sender_agent_id);
+      if (!sender) { reply.code(404); return { error: 'Sender agent not found' }; }
+      senderName = sender.name;
+      senderType = 'agent';
+      senderId = sender.id;
+    } else {
+      senderName = request.user?.name || 'System';
+      senderType = 'user';
+      senderId = request.user?.id;
+    }
+
+    // Store as notification for the target agent
+    const notifId = generateId();
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO agent_notifications (id, agent_id, type, title, content, is_read, data, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(notifId, id, 'agent_message', `Message from ${senderName}`, content, 0,
+      JSON.stringify({ sender_id: senderId, sender_type: senderType, sender_name: senderName }), now);
+
+    // Broadcast via WebSocket
+    const wsManager = request.server.websocketManager;
+    if (wsManager) {
+      wsManager.broadcast('agent:message', {
+        target_agent_id: id,
+        target_agent_name: target.name,
+        sender_id: senderId,
+        sender_name: senderName,
+        sender_type: senderType,
+        content,
+        notification_id: notifId,
+        timestamp: now,
+      }, { userId: id });
+    }
+
+    return {
+      delivered: true,
+      notification_id: notifId,
+      target: { id: target.id, name: target.name },
+      sender: { id: senderId, name: senderName, type: senderType },
+    };
+  } catch (err) {
+    reply.code(500);
+    return { error: err.message };
+  }
+}
+
+module.exports.agentDirectoryRoute = agentDirectoryRoute;
+module.exports.agentMessageRoute = agentMessageRoute;
 module.exports.getRndFeedRoute = getRndFeedRoute;
