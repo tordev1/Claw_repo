@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { projectsApi } from '../services/api';
 import { Plus, Search, Play, Pause, Loader2, FolderOpen } from 'lucide-react';
+import { toast } from '../components/Toast';
 
 interface Project {
   id: string; name: string; type: string; status: string;
@@ -19,7 +20,7 @@ export default function Projects() {
 
   const fetchProjects = async () => {
     try { setLoading(true); const d = await projectsApi.list(); setProjects(d.projects || []); }
-    catch (e) { console.error(e); } finally { setLoading(false); }
+    catch (e) { console.error(e); toast.error('Projects', 'Failed to load projects'); } finally { setLoading(false); }
   };
 
   useEffect(() => { fetchProjects(); }, []);

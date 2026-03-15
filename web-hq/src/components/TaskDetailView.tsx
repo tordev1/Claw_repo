@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { tasksApi, type Task, type TaskUpdate } from '../services/api';
 import AssignmentReplyPanel from './AssignmentReplyPanel';
+import { toast } from './Toast';
 
 interface TaskDetailViewProps {
   task: Task;
@@ -62,6 +63,7 @@ export default function TaskDetailView({ task, projectName, onClose, onUpdate, o
       setUpdates(response.updates || []);
     } catch (err: any) {
       console.error('Failed to load updates:', err);
+      toast.error('Task', 'Failed to load task updates');
     } finally {
       setLoading(false);
     }
@@ -80,6 +82,7 @@ export default function TaskDetailView({ task, projectName, onClose, onUpdate, o
       }
     } catch (err) {
       console.error('Failed to load replies:', err);
+      toast.error('Task', 'Failed to load replies');
     } finally {
       setLoadingReplies(false);
     }

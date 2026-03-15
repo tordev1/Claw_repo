@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { chatApi, wsClient } from '../services/api';
+import { toast } from '../components/Toast';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -151,6 +152,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       for (const id of Object.keys(map)) wsClient.subscribeToChannel(id);
     } catch (err) {
       console.error('fetchChannels:', err);
+      toast.error('Chat', 'Failed to load channels');
       set({ error: 'Failed to load channels' });
     } finally {
       set({ loading: false });
@@ -170,6 +172,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       }));
     } catch (err) {
       console.error('fetchMessages:', err);
+      toast.error('Chat', 'Failed to load messages');
     }
   },
 
@@ -228,6 +231,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       }
     } catch (err: any) {
       console.error('sendMessage failed:', err);
+      toast.error('Chat', 'Message failed to send');
       set(s => ({
         messages: {
           ...s.messages,
@@ -248,6 +252,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       set({ agents: data?.agents || [] });
     } catch (err) {
       console.error('fetchAgents:', err);
+      toast.error('Chat', 'Failed to load agents');
     }
   },
 
@@ -320,6 +325,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       }
     } catch (err: any) {
       console.error('openDm:', err);
+      toast.error('Chat', 'Failed to open DM');
       set({ error: 'Failed to open DM: ' + err.message });
     } finally {
       set({ openingDm: null });

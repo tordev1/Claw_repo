@@ -22,6 +22,7 @@ import {
   Eye,
   Users
 } from 'lucide-react';
+import { toast } from '../components/Toast';
 
 interface Project {
   id: string;
@@ -203,6 +204,7 @@ export default function ProjectDetail() {
       navigate(`/chat?channel=${response.channel.id}`);
     } catch (err) {
       console.error('Failed to open DM:', err);
+      toast.error('DM', 'Failed to open direct message');
       navigate('/chat');
     }
   };
@@ -215,6 +217,7 @@ export default function ProjectDetail() {
       fetchProjectData();
     } catch (err) {
       console.error('Failed to update status:', err);
+      toast.error('Project', 'Failed to update status');
     }
   };
 

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { notificationsApi, wsClient } from '../services/api';
+import { toast } from '../components/Toast';
 
 export interface Notification {
     id: string;
@@ -43,6 +44,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
             });
         } catch (e) {
             console.error('fetchNotifications:', e);
+            toast.error('Notifications', 'Failed to load notifications');
         } finally {
             set({ loading: false });
         }

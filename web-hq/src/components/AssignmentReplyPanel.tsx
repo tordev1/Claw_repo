@@ -10,6 +10,7 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { tasksApi, agentsApi, type Agent } from '../services/api';
+import { toast } from './Toast';
 
 export type ReplyType = 'ACCEPT' | 'REJECT' | 'CLARIFICATION' | 'DELEGATE';
 
@@ -101,6 +102,7 @@ export default function AssignmentReplyPanel({
         setAgents((response.agents || []).filter((a: Agent) => a.id !== currentAgentId));
       } catch (err) {
         console.error('Failed to load agents:', err);
+        toast.error('Agents', 'Failed to load agent list');
       } finally {
         setLoadingAgents(false);
       }

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { agentsApi, projectsApi, fetchApi, wsClient, presetsApi } from '../services/api';
 import type { PresetsResponse } from '../services/api';
+import { toast } from '../components/Toast';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -526,8 +527,9 @@ export default function HQ() {
           : a
       ));
       pushActivity(`→ ${modal.agent.name} assigned to ${modal.project.name} as ${dept}`, 'agent');
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      toast.error('Assignment Failed', e?.message || 'Could not assign agent');
     } finally {
       setSaving(false);
       setModal(null);
@@ -545,7 +547,7 @@ export default function HQ() {
         a.id === agent.id ? { ...a, current_mode: null, current_model: null, project_id: null } : a
       ));
       pushActivity(`← ${agent.name} released to free pool`, 'agent');
-    } catch (e) { console.error(e); }
+    } catch (e: any) { console.error(e); toast.error('Unload Failed', e?.message || 'Could not release agent'); }
   }
 
   const filteredFree = filter === 'all' ? freeAgents : freeAgents.filter(a => a.agent_type === filter);
