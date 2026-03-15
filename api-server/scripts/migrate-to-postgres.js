@@ -1,10 +1,15 @@
 #!/usr/bin/env node
 /**
- * Database Migration Tool
+ * Database Migration Tool — SQLite → PostgreSQL
  * PROJECT-CLAW API Server
- * 
- * Supports: SQLite → PostgreSQL migration
- * Usage: npm run migrate:pg
+ *
+ * Migrates ALL tables automatically. The PostgreSQL schema is created
+ * by the PostgreSQLAdapter in database.js on first connect — this script
+ * only copies data rows.
+ *
+ * Usage:
+ *   DATABASE_URL=postgres://user:pass@host:5432/db npm run migrate:pg
+ *   DATABASE_URL=... SQLITE_PATH=./data/project-claw.db node scripts/migrate-to-postgres.js
  */
 
 const fs = require('fs');
@@ -12,343 +17,204 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const { Client } = require('pg');
 
-// ANSI colors for terminal output
-const colors = {
-  reset: '\x1b[0m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  red: '\x1b[31m',
-  blue: '\x1b[34m',
-  cyan: '\x1b[36m'
+// ANSI colors
+const C = {
+  reset: '\x1b[0m', green: '\x1b[32m', yellow: '\x1b[33m',
+  red: '\x1b[31m', blue: '\x1b[34m', cyan: '\x1b[36m', dim: '\x1b[2m',
 };
+const log = (msg, c = 'reset') => console.log(`${C[c]}${msg}${C.reset}`);
 
-function log(message, color = 'reset') {
-  console.log(`${colors[color]}${message}${colors.reset}`);
+// Tables in dependency order (parents before children)
+const TABLE_ORDER = [
+  'users',
+  'user_sessions',
+  'auth_tokens',
+  'projects',
+  'agents',
+  'manager_agents',
+  'channels',
+  'channel_members',
+  'dm_channels',
+  'messages',
+  'tasks',
+  'task_comments',
+  'task_updates',
+  'task_assignment_history',
+  'costs',
+  'cost_records',
+  'budgets',
+  'machines',
+  'machine_agents',
+  'agent_projects',
+  'agent_notifications',
+  'notifications',
+  'activity_history',
+  'typing_indicators',
+  'presets',
+  'openrouter_sync',
+];
+
+/**
+ * Convert SQLite value to PostgreSQL-compatible value
+ */
+function convertValue(val, colName) {
+  if (val === null || val === undefined) return null;
+
+  // JSON columns — ensure they're valid JSON strings
+  const jsonCols = ['config', 'metadata', 'payload', 'result', 'data', 'preferences', 'api_keys', 'skills', 'specialties', 'tags'];
+  if (jsonCols.includes(colName)) {
+    if (typeof val === 'string') {
+      try { JSON.parse(val); return val; } catch { return '{}'; }
+    }
+    return JSON.stringify(val);
+  }
+
+  return val;
 }
 
-// PostgreSQL schema creation SQL
-const POSTGRES_SCHEMA = `
--- Enable UUID extension
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+/**
+ * Build INSERT ... ON CONFLICT DO NOTHING for a table
+ */
+function buildInsertSQL(tableName, columns) {
+  const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
+  return `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`;
+}
 
--- Projects table
-CREATE TABLE IF NOT EXISTS projects (
-  id UUID PRIMARY KEY,
-  name VARCHAR(255) NOT NULL,
-  description TEXT,
-  status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'paused', 'completed', 'archived')),
-  owner_id VARCHAR(255) NOT NULL,
-  config JSONB DEFAULT '{}',
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
+async function migrate() {
+  log('\n🐘 PROJECT-CLAW: SQLite → PostgreSQL Migration', 'cyan');
+  log('================================================\n', 'cyan');
 
-CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
-CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id);
-CREATE INDEX IF NOT EXISTS idx_projects_created ON projects(created_at);
-
--- Agents table
-CREATE TABLE IF NOT EXISTS agents (
-  id UUID PRIMARY KEY,
-  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
-  name VARCHAR(255) NOT NULL,
-  role VARCHAR(100) NOT NULL,
-  status VARCHAR(20) DEFAULT 'idle' CHECK (status IN ('idle', 'busy', 'error', 'offline')),
-  config JSONB DEFAULT '{}',
-  last_seen TIMESTAMP WITH TIME ZONE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_agents_project ON agents(project_id);
-CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
-
--- Tasks table
-CREATE TABLE IF NOT EXISTS tasks (
-  id UUID PRIMARY KEY,
-  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
-  agent_id UUID REFERENCES agents(id) ON DELETE SET NULL,
-  title VARCHAR(255) NOT NULL,
-  description TEXT,
-  status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),
-  priority INTEGER DEFAULT 1 CHECK (priority BETWEEN 1 AND 5),
-  payload JSONB DEFAULT '{}',
-  result JSONB,
-  started_at TIMESTAMP WITH TIME ZONE,
-  completed_at TIMESTAMP WITH TIME ZONE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_agent ON tasks(agent_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at);
-
--- Costs table
-CREATE TABLE IF NOT EXISTS costs (
-  id UUID PRIMARY KEY,
-  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
-  task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
-  agent_id UUID REFERENCES agents(id) ON DELETE SET NULL,
-  model VARCHAR(100) NOT NULL,
-  prompt_tokens INTEGER DEFAULT 0,
-  completion_tokens INTEGER DEFAULT 0,
-  total_tokens INTEGER DEFAULT 0,
-  cost_usd DECIMAL(10, 6) DEFAULT 0,
-  recorded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_costs_project ON costs(project_id);
-CREATE INDEX IF NOT EXISTS idx_costs_recorded ON costs(recorded_at);
-CREATE INDEX IF NOT EXISTS idx_costs_task ON costs(task_id);
-
--- Create updated_at trigger function
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-  NEW.updated_at = CURRENT_TIMESTAMP;
-  RETURN NEW;
-END;
-$$ language 'plpgsql';
-
--- Create triggers for updated_at
-DROP TRIGGER IF EXISTS update_projects_updated_at ON projects;
-CREATE TRIGGER update_projects_updated_at
-  BEFORE UPDATE ON projects
-  FOR EACH ROW
-  EXECUTE FUNCTION update_updated_at_column();
-
-DROP TRIGGER IF EXISTS update_tasks_updated_at ON tasks;
-CREATE TRIGGER update_tasks_updated_at
-  BEFORE UPDATE ON tasks
-  FOR EACH ROW
-  EXECUTE FUNCTION update_updated_at_column();
-`;
-
-async function migrateSqliteToPostgres() {
-  log('🐢 PROJECT-CLAW Database Migration Tool', 'cyan');
-  log('========================================\n', 'cyan');
-  
-  // Configuration
+  // Config
   const sqlitePath = process.env.SQLITE_PATH || path.join(__dirname, '../data/project-claw.db');
   const pgUrl = process.env.DATABASE_URL;
-  
+
   if (!pgUrl) {
-    log('❌ Error: DATABASE_URL environment variable is not set', 'red');
-    log('\nPlease set your PostgreSQL connection URL:', 'yellow');
-    log('  export DATABASE_URL="postgresql://user:password@host:port/database"\n', 'yellow');
+    log('❌ DATABASE_URL is not set.', 'red');
+    log('   export DATABASE_URL="postgresql://user:pass@localhost:5432/project_claw"', 'yellow');
     process.exit(1);
   }
-  
+
   if (!fs.existsSync(sqlitePath)) {
-    log(`❌ Error: SQLite database not found at ${sqlitePath}`, 'red');
+    log(`❌ SQLite database not found: ${sqlitePath}`, 'red');
     process.exit(1);
   }
-  
-  log(`📁 SQLite Source: ${sqlitePath}`, 'blue');
-  log(`🐘 PostgreSQL Target: ${pgUrl.replace(/:.*@/, ':****@')}\n`, 'blue');
-  
-  // Connect to databases
+
+  log(`📁 Source:  ${sqlitePath}`, 'blue');
+  log(`🐘 Target:  ${pgUrl.replace(/:([^@]+)@/, ':****@')}\n`, 'blue');
+
+  // Connect
   let sqlite, pg;
-  
   try {
-    log('🔌 Connecting to SQLite...', 'yellow');
-    sqlite = new Database(sqlitePath);
-    log('✅ Connected to SQLite\n', 'green');
-    
-    log('🔌 Connecting to PostgreSQL...', 'yellow');
-    pg = new Client({ connectionString: pgUrl, ssl: { rejectUnauthorized: false } });
+    sqlite = new Database(sqlitePath, { readonly: true });
+    log('✅ Connected to SQLite', 'green');
+  } catch (err) {
+    log(`❌ SQLite connection failed: ${err.message}`, 'red');
+    process.exit(1);
+  }
+
+  try {
+    pg = new Client({
+      connectionString: pgUrl,
+      ssl: pgUrl.includes('localhost') || pgUrl.includes('127.0.0.1')
+        ? false
+        : { rejectUnauthorized: false },
+    });
     await pg.connect();
-    log('✅ Connected to PostgreSQL\n', 'green');
+    log('✅ Connected to PostgreSQL', 'green');
   } catch (err) {
-    log(`❌ Connection error: ${err.message}`, 'red');
+    log(`❌ PostgreSQL connection failed: ${err.message}`, 'red');
+    log('   Make sure PostgreSQL is running and DATABASE_URL is correct.', 'yellow');
     process.exit(1);
   }
-  
-  // Create PostgreSQL schema
+
+  // Create schema — use the PostgreSQLAdapter from database.js
+  log('\n🏗️  Creating PostgreSQL schema...', 'yellow');
   try {
-    log('🏗️  Creating PostgreSQL schema...', 'yellow');
-    await pg.query(POSTGRES_SCHEMA);
-    log('✅ Schema created\n', 'green');
+    // Import and initialize the database module which creates all tables
+    process.env.DB_TYPE = 'postgresql';
+    const { initDatabase } = require('../src/database');
+    await initDatabase();
+    log('✅ Schema created via PostgreSQLAdapter\n', 'green');
   } catch (err) {
-    log(`❌ Schema error: ${err.message}`, 'red');
-    process.exit(1);
+    log(`⚠️  Schema creation via adapter failed: ${err.message}`, 'yellow');
+    log('   Attempting migration anyway (tables may already exist).\n', 'dim');
   }
-  
-  // Migration statistics
-  const stats = {
-    projects: 0,
-    agents: 0,
-    tasks: 0,
-    costs: 0
-  };
-  
-  // Migrate projects
-  try {
-    log('📦 Migrating projects...', 'yellow');
-    const projects = sqlite.prepare('SELECT * FROM projects').all();
-    
-    for (const project of projects) {
-      await pg.query(`
-        INSERT INTO projects (id, name, description, status, owner_id, config, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        ON CONFLICT (id) DO UPDATE SET
-          name = EXCLUDED.name,
-          description = EXCLUDED.description,
-          status = EXCLUDED.status,
-          owner_id = EXCLUDED.owner_id,
-          config = EXCLUDED.config,
-          updated_at = EXCLUDED.updated_at
-      `, [
-        project.id,
-        project.name,
-        project.description,
-        project.status,
-        project.owner_id,
-        project.config || '{}',
-        project.created_at,
-        project.updated_at
-      ]);
-      stats.projects++;
+
+  // Get all SQLite tables
+  const sqliteTables = sqlite.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+  ).all().map(t => t.name);
+
+  log(`📊 Found ${sqliteTables.length} tables in SQLite\n`, 'blue');
+
+  // Migrate in dependency order, then any remaining tables
+  const orderedTables = [
+    ...TABLE_ORDER.filter(t => sqliteTables.includes(t)),
+    ...sqliteTables.filter(t => !TABLE_ORDER.includes(t)),
+  ];
+
+  const stats = {};
+  let totalRows = 0;
+  let totalErrors = 0;
+
+  for (const table of orderedTables) {
+    const rows = sqlite.prepare(`SELECT * FROM ${table}`).all();
+    if (rows.length === 0) {
+      log(`   ${table}: ${C.dim}0 rows (skipped)${C.reset}`);
+      stats[table] = 0;
+      continue;
     }
-    log(`✅ Migrated ${stats.projects} projects\n`, 'green');
-  } catch (err) {
-    log(`❌ Projects migration error: ${err.message}`, 'red');
-  }
-  
-  // Migrate agents
-  try {
-    log('🤖 Migrating agents...', 'yellow');
-    const agents = sqlite.prepare('SELECT * FROM agents').all();
-    
-    for (const agent of agents) {
-      await pg.query(`
-        INSERT INTO agents (id, project_id, name, role, status, config, last_seen, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        ON CONFLICT (id) DO UPDATE SET
-          project_id = EXCLUDED.project_id,
-          name = EXCLUDED.name,
-          role = EXCLUDED.role,
-          status = EXCLUDED.status,
-          config = EXCLUDED.config,
-          last_seen = EXCLUDED.last_seen
-      `, [
-        agent.id,
-        agent.project_id,
-        agent.name,
-        agent.role,
-        agent.status,
-        agent.config || '{}',
-        agent.last_seen,
-        agent.created_at
-      ]);
-      stats.agents++;
+
+    const columns = Object.keys(rows[0]);
+    const insertSQL = buildInsertSQL(table, columns);
+
+    let migrated = 0;
+    let errors = 0;
+
+    for (const row of rows) {
+      const values = columns.map(col => convertValue(row[col], col));
+      try {
+        await pg.query(insertSQL, values);
+        migrated++;
+      } catch (err) {
+        errors++;
+        if (errors <= 3) {
+          log(`     ⚠ ${table} row ${row.id || '?'}: ${err.message.substring(0, 80)}`, 'dim');
+        }
+      }
     }
-    log(`✅ Migrated ${stats.agents} agents\n`, 'green');
-  } catch (err) {
-    log(`❌ Agents migration error: ${err.message}`, 'red');
+
+    const errorNote = errors > 0 ? ` ${C.yellow}(${errors} skipped)${C.reset}` : '';
+    log(`   ${table}: ${C.green}${migrated}${C.reset} rows migrated${errorNote}`);
+    stats[table] = migrated;
+    totalRows += migrated;
+    totalErrors += errors;
   }
-  
-  // Migrate tasks
-  try {
-    log('📋 Migrating tasks...', 'yellow');
-    const tasks = sqlite.prepare('SELECT * FROM tasks').all();
-    
-    for (const task of tasks) {
-      await pg.query(`
-        INSERT INTO tasks (id, project_id, agent_id, title, description, status, priority, payload, result, started_at, completed_at, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-        ON CONFLICT (id) DO UPDATE SET
-          project_id = EXCLUDED.project_id,
-          agent_id = EXCLUDED.agent_id,
-          title = EXCLUDED.title,
-          description = EXCLUDED.description,
-          status = EXCLUDED.status,
-          priority = EXCLUDED.priority,
-          payload = EXCLUDED.payload,
-          result = EXCLUDED.result,
-          started_at = EXCLUDED.started_at,
-          completed_at = EXCLUDED.completed_at
-      `, [
-        task.id,
-        task.project_id,
-        task.agent_id,
-        task.title,
-        task.description,
-        task.status,
-        task.priority,
-        task.payload || '{}',
-        task.result || null,
-        task.started_at,
-        task.completed_at,
-        task.created_at,
-        task.updated_at
-      ]);
-      stats.tasks++;
-    }
-    log(`✅ Migrated ${stats.tasks} tasks\n`, 'green');
-  } catch (err) {
-    log(`❌ Tasks migration error: ${err.message}`, 'red');
-  }
-  
-  // Migrate costs
-  try {
-    log('💰 Migrating costs...', 'yellow');
-    const costs = sqlite.prepare('SELECT * FROM costs').all();
-    
-    for (const cost of costs) {
-      await pg.query(`
-        INSERT INTO costs (id, project_id, task_id, agent_id, model, prompt_tokens, completion_tokens, total_tokens, cost_usd, recorded_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        ON CONFLICT (id) DO UPDATE SET
-          project_id = EXCLUDED.project_id,
-          task_id = EXCLUDED.task_id,
-          agent_id = EXCLUDED.agent_id,
-          model = EXCLUDED.model,
-          prompt_tokens = EXCLUDED.prompt_tokens,
-          completion_tokens = EXCLUDED.completion_tokens,
-          total_tokens = EXCLUDED.total_tokens,
-          cost_usd = EXCLUDED.cost_usd
-      `, [
-        cost.id,
-        cost.project_id,
-        cost.task_id,
-        cost.agent_id,
-        cost.model,
-        cost.prompt_tokens || 0,
-        cost.completion_tokens || 0,
-        cost.total_tokens || 0,
-        cost.cost_usd || 0,
-        cost.recorded_at
-      ]);
-      stats.costs++;
-    }
-    log(`✅ Migrated ${stats.costs} costs\n`, 'green');
-  } catch (err) {
-    log(`❌ Costs migration error: ${err.message}`, 'red');
-  }
-  
+
   // Close connections
   sqlite.close();
   await pg.end();
-  
+
   // Summary
-  log('\n========================================', 'cyan');
+  log('\n================================================', 'cyan');
   log('🎉 Migration Complete!', 'cyan');
-  log('========================================', 'cyan');
-  log(`📊 Total records migrated:`, 'green');
-  log(`   Projects: ${stats.projects}`, 'green');
-  log(`   Agents: ${stats.agents}`, 'green');
-  log(`   Tasks: ${stats.tasks}`, 'green');
-  log(`   Costs: ${stats.costs}`, 'green');
+  log('================================================\n', 'cyan');
+
+  const tablesWithData = Object.entries(stats).filter(([, v]) => v > 0);
+  log(`📊 ${totalRows} total rows migrated across ${tablesWithData.length} tables`, 'green');
+  if (totalErrors > 0) {
+    log(`⚠️  ${totalErrors} rows skipped (duplicates or constraint violations)`, 'yellow');
+  }
+
   log('\n📝 Next steps:', 'yellow');
-  log('   1. Update .env: DB_TYPE=postgresql', 'yellow');
-  log('   2. Set DATABASE_URL in production', 'yellow');
-  log('   3. Restart the server\n', 'yellow');
+  log('   1. Set in .env:  DB_TYPE=postgresql', 'yellow');
+  log('   2. Set in .env:  DATABASE_URL=your_connection_string', 'yellow');
+  log('   3. Restart the server:  npm run dev', 'yellow');
+  log('   4. Verify at:  http://localhost:3001/health\n', 'yellow');
 }
 
-// Run migration
-migrateSqliteToPostgres().catch(err => {
-  log(`❌ Fatal error: ${err.message}`, 'red');
+migrate().catch(err => {
+  log(`\n❌ Fatal error: ${err.message}`, 'red');
+  console.error(err);
   process.exit(1);
 });

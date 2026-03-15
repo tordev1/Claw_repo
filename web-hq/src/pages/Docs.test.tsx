@@ -57,10 +57,10 @@ describe('Docs page', () => {
   it('switches to roadmap tab', () => {
     render(<Docs />);
     fireEvent.click(screen.getByText('ROADMAP'));
-    expect(screen.getByText(/CURRENT STAGE/)).toBeInTheDocument();
+    expect(screen.getByText('PROJECT COMPLETE')).toBeInTheDocument();
     expect(screen.getByText('ESTIMATED TIMELINE')).toBeInTheDocument();
     expect(screen.getByText('DEVELOPMENT PHASES')).toBeInTheDocument();
-    expect(screen.getByText("WHAT'S NEXT")).toBeInTheDocument();
+    expect(screen.getByText('FUTURE ENHANCEMENTS')).toBeInTheDocument();
   });
 
   it('shows phase progress in roadmap', () => {

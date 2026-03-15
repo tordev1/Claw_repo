@@ -73,25 +73,29 @@ services:
       retries: 3
       start_period: 5s
 
-  # Optional: PostgreSQL Database (for production use)
-  # Uncomment to use PostgreSQL instead of SQLite
-  # db:
-  #   image: postgres:15-alpine
-  #   container_name: claw-postgres
-  #   environment:
-  #     POSTGRES_USER: ${DB_USER:-projectclaw}
-  #     POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
-  #     POSTGRES_DB: ${DB_NAME:-project_claw}
-  #   volumes:
-  #     - postgres-data:/var/lib/postgresql/data
-  #   networks:
-  #     - claw-network
-  #   restart: unless-stopped
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-projectclaw}"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
+  # PostgreSQL Database (for production use)
+  # Start with: DB_TYPE=postgresql docker compose up
+  db:
+    image: postgres:15-alpine
+    container_name: claw-postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-projectclaw}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+      POSTGRES_DB: ${DB_NAME:-project_claw}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    networks:
+      - claw-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-projectclaw}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - postgres
 
   # Optional: Redis for rate limiting (high-traffic deployments)
   # redis:
@@ -111,8 +115,8 @@ services:
 volumes:
   api-data:
     driver: local
-  # postgres-data:
-  #   driver: local
+  postgres-data:
+    driver: local
   # redis-data:
   #   driver: local
 
