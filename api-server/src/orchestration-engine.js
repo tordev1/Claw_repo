@@ -26,6 +26,11 @@ const ROLE_KEYWORDS = {
   uiux:      ['figma', 'wireframe', 'prototype', 'ux', 'user experience', 'accessibility', 'a11y', 'visual', 'branding', 'mockup', 'user flow'],
 };
 
+// ---------------------------------------------------------------------------
+// Sweep concurrency guard — prevents double-run from rapid admin clicks
+// ---------------------------------------------------------------------------
+let _sweepRunning = false;
+
 /**
  * Infer the most appropriate agent role/mode from a task's title + description.
  * Returns one of the keys in ROLE_KEYWORDS, defaulting to 'backend'.
@@ -85,7 +90,9 @@ function selectCandidateAgents({ role, projectId }) {
 
     // Skills array match
     let skills = [];
-    try { skills = JSON.parse(agent.skills || '[]'); } catch {}
+    try { skills = JSON.parse(agent.skills || '[]'); } catch (e) {
+      console.warn(`[Orchestration] Skills JSON parse failed for agent ${agent.id}:`, e.message);
+    }
     if (skills.some(s => typeof s === 'string' && (s.toLowerCase().includes(role) || role.includes(s.toLowerCase())))) {
       score += 5;
     }
@@ -100,6 +107,52 @@ function selectCandidateAgents({ role, projectId }) {
   });
 
   return scored.sort((a, b) => b._score - a._score);
+}
+
+/**
+ * Diagnose why no candidates were found for a task.
+ * Returns a specific reason string for logging and sweep details.
+ */
+function diagnoseMissingCandidates(db, projectId) {
+  try {
+    const totalInProject = db.prepare(`
+      SELECT COUNT(*) AS cnt
+      FROM   manager_agents ma
+      JOIN   agent_projects ap ON ap.agent_id = ma.id
+                               AND ap.project_id = ?
+                               AND ap.status = 'active'
+    `).get(projectId);
+
+    if (!totalInProject || totalInProject.cnt === 0) return 'no_agents_in_project';
+
+    const approvedInProject = db.prepare(`
+      SELECT COUNT(*) AS cnt
+      FROM   manager_agents ma
+      JOIN   agent_projects ap ON ap.agent_id = ma.id
+                               AND ap.project_id = ?
+                               AND ap.status = 'active'
+      WHERE  ma.is_approved = TRUE
+    `).get(projectId);
+
+    if (!approvedInProject || approvedInProject.cnt === 0) return 'no_approved_agents_in_project';
+
+    const onlineApproved = db.prepare(`
+      SELECT COUNT(*) AS cnt
+      FROM   manager_agents ma
+      JOIN   agent_projects ap ON ap.agent_id = ma.id
+                               AND ap.project_id = ?
+                               AND ap.status = 'active'
+      WHERE  ma.is_approved = TRUE
+        AND  ma.status != 'offline'
+        AND  ma.agent_type != 'pm'
+    `).get(projectId);
+
+    if (!onlineApproved || onlineApproved.cnt === 0) return 'no_online_non_pm_agents';
+
+    return 'no_eligible_agents';
+  } catch (e) {
+    return 'no_candidates';
+  }
 }
 
 /**
@@ -129,14 +182,20 @@ function autoAssignTask(taskId, opts = {}) {
     return { success: false, reason: 'wrong_status' };
   }
 
+  if (!task.project_id) {
+    console.log(`[Orchestration] Task ${taskId} has no project_id — cannot assign`);
+    return { success: false, reason: 'no_project_id' };
+  }
+
   const role = inferTaskRole(task);
   console.log(`[Orchestration] Task "${task.title}" (${taskId}) → inferred role: ${role}`);
 
   const candidates = selectCandidateAgents({ role, projectId: task.project_id });
 
   if (candidates.length === 0) {
-    console.log(`[Orchestration] No eligible agents for task ${taskId} (role=${role}, project=${task.project_id})`);
-    return { success: false, reason: 'no_candidates', role };
+    const reason = diagnoseMissingCandidates(db, task.project_id);
+    console.log(`[Orchestration] No eligible agents for task ${taskId} (role=${role}, project=${task.project_id}, reason=${reason})`);
+    return { success: false, reason, role };
   }
 
   const agent = candidates[0];
@@ -154,6 +213,13 @@ function autoAssignTask(taskId, opts = {}) {
            updated_at  = ?
     WHERE  id = ?
   `).run(agent.id, assignedBy, now, now, taskId);
+
+  // Verify the assignment actually persisted
+  const verified = db.prepare('SELECT agent_id FROM tasks WHERE id = ?').get(taskId);
+  if (!verified || verified.agent_id !== agent.id) {
+    console.error(`[Orchestration] Assignment verification failed for task ${taskId} — DB write may have been rolled back`);
+    return { success: false, reason: 'assignment_verification_failed' };
+  }
 
   // Assignment history (best-effort)
   try {
@@ -215,8 +281,28 @@ function autoAssignTask(taskId, opts = {}) {
 /**
  * Scan all pending/unassigned tasks across all projects and attempt assignment.
  * Returns aggregate summary.
+ *
+ * Guards against concurrent invocation — returns immediately if a sweep is already running.
  */
 function runAutoAssignmentSweep() {
+  if (_sweepRunning) {
+    console.warn('[Orchestration] Sweep already in progress — skipping concurrent call');
+    return {
+      scanned: 0, assigned: 0, skipped: 0, errors: 0,
+      details: [],
+      skipped_reason: 'sweep_already_running',
+    };
+  }
+
+  _sweepRunning = true;
+  try {
+    return _doSweep();
+  } finally {
+    _sweepRunning = false;
+  }
+}
+
+function _doSweep() {
   const db = getDb();
 
   const unassigned = db.prepare(`
@@ -255,6 +341,7 @@ function runAutoAssignmentSweep() {
           task_title: task.title,
           status:     'skipped',
           reason:     result.reason,
+          role:       result.role || null,
         });
       }
     } catch (e) {
