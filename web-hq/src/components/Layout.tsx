@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FolderKanban, CheckSquare, DollarSign,
   Activity, Settings, MessageSquare, Bot, Menu, X,
   LogOut, ChevronRight, Shield, Coins, UserPlus, Radio, Shuffle,
-  Zap, BookOpen, FlaskConical, Server
+  Zap, BookOpen, FlaskConical, Server, Sun, Moon
 } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 
@@ -34,10 +34,31 @@ const ADMIN_NAV = [
   { path: '/agents/register',icon: UserPlus, label: 'New Agent',   group: 'admin' },
 ];
 
+function getInitialTheme(): 'dark' | 'light' {
+  try { return (localStorage.getItem('claw_theme') as 'dark' | 'light') || 'dark'; }
+  catch { return 'dark'; }
+}
+
 export default function Layout({ children, user, onLogout }: LayoutProps) {
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [theme, setTheme] = useState<'dark' | 'light'>(getInitialTheme);
   const isAdmin = user?.role === 'admin';
+
+  // Keep html[data-theme] in sync with state (handles SSR-like mount edge cases)
+  useEffect(() => {
+    if (theme === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+  }, [theme]);
+
+  const toggleTheme = () => {
+    const next: 'dark' | 'light' = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    try { localStorage.setItem('claw_theme', next); } catch {}
+  };
 
   const NavItem = ({ item }: { item: typeof NAV[0] }) => {
     const active = location.pathname === item.path ||
@@ -261,7 +282,7 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
             {mobileOpen ? <X size={14} /> : <Menu size={14} />}
           </button>
 
-          {/* Right side: system status + notifications */}
+          {/* Right side: system status + theme toggle + notifications */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
             {/* Online pill */}
             <div style={{
@@ -284,6 +305,18 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
                 ONLINE
               </span>
             </div>
+
+            {/* Theme toggle */}
+            <button
+              className="theme-toggle"
+              onClick={toggleTheme}
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {theme === 'dark'
+                ? <Sun size={13} strokeWidth={1.8} />
+                : <Moon size={13} strokeWidth={1.8} />
+              }
+            </button>
 
             <NotificationBell />
           </div>

@@ -5,6 +5,15 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PROJECT-CLAW Web HQ</title>
+    <!-- Theme flash prevention: apply stored theme before React mounts -->
+    <script>
+      (function() {
+        try {
+          var t = localStorage.getItem('claw_theme');
+          if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+        } catch(e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

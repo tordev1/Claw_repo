@@ -622,3 +622,103 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .neon-card-pm::before     { background: linear-gradient(90deg, transparent, rgba(245,158,11,0.5), transparent); }
 .neon-card-worker::before { background: linear-gradient(90deg, transparent, rgba(59,130,246,0.5), transparent); }
 .neon-card-rnd::before    { background: linear-gradient(90deg, transparent, rgba(239,68,68,0.5), transparent); }
+
+/* ============================================================
+   LIGHT THEME — data-theme="light" on <html>
+   Overrides ink/text variables; accent colors stay neon.
+   ============================================================ */
+
+[data-theme="light"] {
+  /* Backgrounds: lightest surfaces for most-used layers */
+  --ink:      #eef0f8;
+  --ink-1:    #f4f6fb;
+  --ink-2:    #ffffff;
+  --ink-3:    #f0f2f9;
+  --ink-4:    #dde1ef;
+  --ink-5:    #c4cade;
+
+  /* Legacy compat */
+  --wire:      #dde1ef;
+  --wire-soft: #eef0f8;
+
+  /* Glow layers — slightly more opaque so they read on white */
+  --glow-cyan:     rgba(34, 211, 238, 0.10);
+  --glow-cyan-md:  rgba(34, 211, 238, 0.20);
+  --glow-amber:    rgba(245, 158, 11, 0.10);
+  --glow-amber-md: rgba(245, 158, 11, 0.20);
+  --glow-blue:     rgba(59, 130, 246, 0.10);
+  --glow-red:      rgba(239, 68, 68, 0.10);
+  --glow-green:    rgba(16, 185, 129, 0.10);
+  --glow-purple:   rgba(139, 92, 246, 0.10);
+  --glow-pink:     rgba(244, 114, 182, 0.10);
+
+  --amber-glow:    rgba(245, 158, 11, 0.10);
+  --amber-line:    rgba(245, 158, 11, 0.22);
+
+  /* Text: dark on light */
+  --text-hi:  #0f1023;
+  --text-mid: #454870;
+  --text-lo:  #8890b0;
+  --text-dim: #b8bed8;
+}
+
+/* Hide CRT scanline in light mode (it looks wrong on white) */
+[data-theme="light"] body::before { display: none; }
+
+/* Lighten grid overlay in light mode */
+[data-theme="light"] body::after {
+  background-image:
+    linear-gradient(rgba(34, 211, 238, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 211, 238, 0.035) 1px, transparent 1px);
+}
+
+/* Scrollbar */
+[data-theme="light"] * {
+  scrollbar-color: var(--ink-4) var(--ink-2);
+}
+[data-theme="light"] *::-webkit-scrollbar-track { background: var(--ink-2); }
+[data-theme="light"] *::-webkit-scrollbar-thumb { background: var(--ink-4); }
+[data-theme="light"] *::-webkit-scrollbar-thumb:hover { background: var(--ink-5); }
+
+/* Badges: slightly more opaque fill so they pop on white cards */
+[data-theme="light"] .ops-badge-green  { background: rgba(16,185,129,.14);  }
+[data-theme="light"] .ops-badge-red    { background: rgba(239,68,68,.14);   }
+[data-theme="light"] .ops-badge-amber  { background: rgba(245,158,11,.14);  }
+[data-theme="light"] .ops-badge-blue   { background: rgba(59,130,246,.14);  }
+[data-theme="light"] .ops-badge-cyan   { background: rgba(34,211,238,.14);  }
+[data-theme="light"] .ops-badge-purple { background: rgba(139,92,246,.14);  }
+[data-theme="light"] .ops-badge-pink   { background: rgba(244,114,182,.14); }
+[data-theme="light"] .ops-badge-gray   { background: rgba(100,110,150,.14); color: #5a6080; border-color: rgba(100,110,150,.3); }
+
+/* Status dot glows: keep but reduce intensity for light bg */
+[data-theme="light"] .ops-dot-green  { box-shadow: 0 0 5px #10b981, 0 0 10px rgba(16,185,129,.3); }
+[data-theme="light"] .ops-dot-amber  { box-shadow: 0 0 5px #f59e0b, 0 0 10px rgba(245,158,11,.3); }
+[data-theme="light"] .ops-dot-red    { box-shadow: 0 0 5px #ef4444, 0 0 10px rgba(239,68,68,.3); }
+[data-theme="light"] .ops-dot-cyan   { box-shadow: 0 0 5px #22d3ee, 0 0 10px rgba(34,211,238,.3); }
+[data-theme="light"] .ops-dot-blue   { box-shadow: 0 0 5px #3b82f6, 0 0 10px rgba(59,130,246,.3); }
+[data-theme="light"] .ops-dot-purple { box-shadow: 0 0 5px #8b5cf6; }
+[data-theme="light"] .ops-dot-gray   { background: var(--ink-5); box-shadow: none; }
+
+/* Table hover on light bg */
+[data-theme="light"] .ops-table tr:hover td { background: var(--ink-3); color: var(--text-hi); }
+
+/* Theme toggle button */
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  border: 1px solid var(--ink-4);
+  background: var(--ink-3);
+  color: var(--text-mid);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+  flex-shrink: 0;
+}
+.theme-toggle:hover {
+  border-color: rgba(34, 211, 238, 0.4);
+  color: var(--cyan);
+  background: var(--glow-cyan);
+}
