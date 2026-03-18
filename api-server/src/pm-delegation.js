@@ -255,17 +255,17 @@ function delegateTasksToWorkers(projectId, tasks, pmAgentId, db, wsManager) {
  * @returns {Array}            - list of assigned agent rows
  */
 function autoCollectWorkersForPm(db, projectId, pmAgentId, wsManager) {
-  // 1. Find available worker agents (approved, not offline) not already on this project
+  // 1. Find available worker agents (approved, any status) not already on this project
+  // Status is not a blocker — admin-triggered assignment collects all approved workers
   const workers = db.prepare(`
     SELECT ma.*
     FROM manager_agents ma
     WHERE ma.agent_type = 'worker'
       AND ma.is_approved = 1
-      AND ma.status != 'offline'
       AND ma.id NOT IN (
         SELECT agent_id FROM agent_projects WHERE project_id = ?
       )
-    ORDER BY CASE ma.status WHEN 'idle' THEN 0 WHEN 'online' THEN 1 ELSE 2 END ASC
+    ORDER BY CASE ma.status WHEN 'online' THEN 0 WHEN 'idle' THEN 1 WHEN 'working' THEN 2 ELSE 3 END ASC
     LIMIT 3
   `).all(projectId);
 

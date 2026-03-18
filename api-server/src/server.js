@@ -794,11 +794,13 @@ async function start() {
         const db = getDb();
         const staleThreshold = new Date(Date.now() - 90 * 1000).toISOString();
         const staleAgents = db.prepare(`
-          SELECT id, name FROM manager_agents
+          SELECT id, name, metadata FROM manager_agents
           WHERE status = 'online'
             AND is_approved = 1
             AND (last_heartbeat IS NULL OR last_heartbeat < ?)
-        `).all(staleThreshold);
+        `).all(staleThreshold).filter(a => {
+          try { return !JSON.parse(a.metadata || '{}').simulated; } catch { return true; }
+        });
 
         for (const agent of staleAgents) {
           db.prepare(`UPDATE manager_agents SET status = 'offline', updated_at = ? WHERE id = ?`)
