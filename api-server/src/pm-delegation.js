@@ -243,4 +243,70 @@ function delegateTasksToWorkers(projectId, tasks, pmAgentId, db, wsManager) {
   return assignments;
 }
 
-module.exports = { delegateTasksToWorkers, scoreWorker, pickWorker, ROLE_KEYWORDS };
+/**
+ * Auto-collect worker agents for a PM when the PM is assigned to a project.
+ * Finds available workers (approved, not offline) not already on the project,
+ * assigns up to 3 of them, and broadcasts a ws event.
+ *
+ * @param {object} db          - better-sqlite3 instance
+ * @param {string} projectId   - the project the PM was just assigned to
+ * @param {string} pmAgentId   - the PM agent id
+ * @param {object} wsManager   - websocket manager
+ * @returns {Array}            - list of assigned agent rows
+ */
+function autoCollectWorkersForPm(db, projectId, pmAgentId, wsManager) {
+  // 1. Find available worker agents (approved, not offline) not already on this project
+  const workers = db.prepare(`
+    SELECT ma.*
+    FROM manager_agents ma
+    WHERE ma.agent_type = 'worker'
+      AND ma.is_approved = 1
+      AND ma.status != 'offline'
+      AND ma.id NOT IN (
+        SELECT agent_id FROM agent_projects WHERE project_id = ?
+      )
+    ORDER BY CASE ma.status WHEN 'idle' THEN 0 WHEN 'online' THEN 1 ELSE 2 END ASC
+    LIMIT 3
+  `).all(projectId);
+
+  if (!workers.length) {
+    console.log(`[PM Auto-Collect] No available workers to collect for project ${projectId}`);
+    return [];
+  }
+
+  const now = new Date().toISOString();
+  const assigned = [];
+
+  for (const worker of workers) {
+    try {
+      const { v4: uuidv4 } = require('uuid');
+      db.prepare(`
+        INSERT INTO agent_projects (id, agent_id, project_id, role, status, assigned_by, assigned_at)
+        VALUES (?, ?, ?, 'worker', 'active', ?, ?)
+      `).run(uuidv4(), worker.id, projectId, pmAgentId, now);
+      assigned.push(worker);
+      console.log(`[PM Auto-Collect] Worker "${worker.name}" collected for project ${projectId}`);
+    } catch (e) {
+      // Already assigned — skip
+      if (!e.message.includes('UNIQUE')) {
+        console.error(`[PM Auto-Collect] Error assigning worker ${worker.name}:`, e.message);
+      }
+    }
+  }
+
+  // 5. Broadcast ws event with collected agent names
+  if (assigned.length > 0) {
+    try {
+      wsManager.broadcast('project:agents_collected', {
+        project_id: projectId,
+        pm_agent_id: pmAgentId,
+        agents: assigned.map(a => ({ id: a.id, name: a.name, role: a.role })),
+        collected_at: now,
+      });
+    } catch (e) { /* ignore ws errors */ }
+  }
+
+  return assigned;
+}
+
+module.exports = { delegateTasksToWorkers, scoreWorker, pickWorker, ROLE_KEYWORDS, autoCollectWorkersForPm };

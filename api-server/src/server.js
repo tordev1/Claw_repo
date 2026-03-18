@@ -508,6 +508,7 @@ async function buildServer() {
   fastify.post('/api/admin/agents/:id/approve', { preHandler: authMiddleware }, routes.approveManagerAgentRoute);
   fastify.post('/api/admin/agents/:id/reject', { preHandler: authMiddleware }, routes.rejectManagerAgentRoute);
   fastify.delete('/api/admin/agents/:id', { preHandler: authMiddleware }, routes.deleteManagerAgentRoute);
+  fastify.delete('/api/admin/chat/cleanup', { preHandler: authMiddleware }, routes.adminChatCleanupRoute);
   fastify.get('/api/admin/agents/pending', { preHandler: authMiddleware }, routes.listPendingAgentsRoute);
   fastify.get('/api/admin/agents/approved', { preHandler: authMiddleware }, routes.listApprovedAgentsRoute);
   fastify.get('/api/admin/users', { preHandler: authMiddleware }, routes.listUsersRoute);

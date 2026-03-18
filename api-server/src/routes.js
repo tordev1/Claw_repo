@@ -3296,6 +3296,20 @@ async function assignAgentToProjectRouteV2(request, reply) {
       }
     }
 
+    // PM Auto-Collect: if assigned agent is a PM, auto-collect available workers
+    let collectedWorkers = [];
+    if (agent.agent_type === 'pm') {
+      try {
+        const { autoCollectWorkersForPm } = require('./pm-delegation');
+        collectedWorkers = autoCollectWorkersForPm(db, id, agent_id, wsManager);
+        if (collectedWorkers.length) {
+          console.log(`[PM Auto-Collect] Collected ${collectedWorkers.length} workers for project ${id}`);
+        }
+      } catch (collectErr) {
+        console.error('[PM Auto-Collect] Error collecting workers:', collectErr.message);
+      }
+    }
+
     reply.code(201);
     return {
       assignment_id: assignmentId,
@@ -3307,6 +3321,7 @@ async function assignAgentToProjectRouteV2(request, reply) {
       assigned_at: now,
       generated_tasks: generatedTasks.length > 0 ? generatedTasks : undefined,
       delegated_tasks: delegatedAssignments.length > 0 ? delegatedAssignments : undefined,
+      collected_workers: collectedWorkers.length > 0 ? collectedWorkers.map(w => ({ id: w.id, name: w.name })) : undefined,
     };
   } catch (err) {
     if (err.message.includes('UNIQUE constraint failed')) {
@@ -5671,6 +5686,46 @@ async function agentMessageRoute(request, reply) {
   }
 }
 
+// ============================================================================
+// ADMIN CHAT CLEANUP ROUTE
+// ============================================================================
+
+// DELETE /api/admin/chat/cleanup - Clean up broken/empty chat data (admin only)
+function adminChatCleanupRoute(request, reply) {
+  const user = request.user;
+
+  if (!user || user.role !== 'admin') {
+    reply.code(403);
+    return { error: 'Admin access required' };
+  }
+
+  const db = getDb();
+  const now = new Date().toISOString();
+
+  // 1. Delete all messages where content is empty OR content IS NULL
+  const deletedMessages = db.prepare(
+    "DELETE FROM messages WHERE content IS NULL OR content = ''"
+  ).run().changes;
+
+  // 2. Delete channels with zero messages, type != 'general', and is_archived = 1
+  const deletedChannels = db.prepare(`
+    DELETE FROM channels
+    WHERE type != 'general'
+      AND is_archived = 1
+      AND id NOT IN (SELECT DISTINCT channel_id FROM messages WHERE channel_id IS NOT NULL)
+  `).run().changes;
+
+  // 3. Delete expired typing indicators
+  const deletedTyping = db.prepare(
+    'DELETE FROM typing_indicators WHERE expires_at < ?'
+  ).run(now).changes;
+
+  console.log(`[Chat Cleanup] Deleted: ${deletedMessages} messages, ${deletedChannels} channels, ${deletedTyping} typing indicators`);
+
+  return { deletedMessages, deletedChannels, deletedTyping };
+}
+
+module.exports.adminChatCleanupRoute = adminChatCleanupRoute;
 module.exports.agentDirectoryRoute = agentDirectoryRoute;
 module.exports.agentMessageRoute = agentMessageRoute;
 module.exports.getRndFeedRoute = getRndFeedRoute;
