@@ -282,8 +282,8 @@ function autoCollectWorkersForPm(db, projectId, pmAgentId, wsManager) {
       const { v4: uuidv4 } = require('uuid');
       db.prepare(`
         INSERT INTO agent_projects (id, agent_id, project_id, role, status, assigned_by, assigned_at)
-        VALUES (?, ?, ?, 'worker', 'active', ?, ?)
-      `).run(uuidv4(), worker.id, projectId, pmAgentId, now);
+        VALUES (?, ?, ?, 'worker', 'active', 'user-scorpion-001', ?)
+      `).run(uuidv4(), worker.id, projectId, now);
       assigned.push(worker);
       console.log(`[PM Auto-Collect] Worker "${worker.name}" collected for project ${projectId}`);
     } catch (e) {

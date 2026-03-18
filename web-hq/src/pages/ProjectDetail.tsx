@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { projectsApi, projectAgentsApi, chatApi, getPriorityLabel, type Agent } from '../services/api';
+import { projectsApi, projectAgentsApi, chatApi, getPriorityLabel, wsClient, type Agent } from '../services/api';
 import ProjectAssignAgentDialog from '../components/ProjectAssignAgentDialog';
 import TaskList from '../components/TaskList';
 import {
@@ -139,6 +139,33 @@ export default function ProjectDetail() {
     }
   }, [id]);
 
+  // Auto-refresh when orchestration assigns tasks or agents are collected
+  const fetchTasksRef = useRef<() => void>(() => {});
+  const fetchAgentsRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    fetchTasksRef.current = async () => {
+      const tasksData = await projectsApi.getTasks(id!).catch(() => ({ tasks: [] }));
+      setProjectTasks(tasksData.tasks || []);
+    };
+    fetchAgentsRef.current = fetchProjectAgents;
+  });
+  useEffect(() => {
+    const onTaskChange = () => fetchTasksRef.current();
+    const onAgentChange = () => fetchAgentsRef.current();
+    wsClient.on('task:assigned', onTaskChange);
+    wsClient.on('task:created', onTaskChange);
+    wsClient.on('task:started', onTaskChange);
+    wsClient.on('task:completed', onTaskChange);
+    wsClient.on('project:agents_collected', onAgentChange);
+    return () => {
+      wsClient.off('task:assigned', onTaskChange);
+      wsClient.off('task:created', onTaskChange);
+      wsClient.off('task:started', onTaskChange);
+      wsClient.off('task:completed', onTaskChange);
+      wsClient.off('project:agents_collected', onAgentChange);
+    };
+  }, []);
+
   const fetchProjectData = async () => {
     try {
       setLoading(true);
@@ -177,7 +204,10 @@ export default function ProjectDetail() {
 
   const handleAssignAgent = async (agentId: string, role: 'lead' | 'contributor' | 'observer') => {
     await projectAgentsApi.assign(id!, agentId, role);
+    // Refresh agents and tasks — PM assignment auto-collects workers and may generate tasks
     await fetchProjectAgents();
+    const tasksData = await projectsApi.getTasks(id!).catch(() => ({ tasks: [] }));
+    setProjectTasks(tasksData.tasks || []);
   };
 
   const handleRemoveAgent = async (agentId: string) => {
