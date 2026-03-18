@@ -476,6 +476,11 @@ export const adminApi = {
     fetchApi(`/api/admin/agents/${agentId}`, { method: 'DELETE' }),
 };
 
+// Orchestration Engine API
+export const orchestrationApi = {
+  sweep: () => fetchApi('/api/orchestration/sweep', { method: 'POST' }),
+};
+
 // Credits API for token usage (deprecated - use tokensApi instead)
 export const creditsApi = {
   // Get credits by provider

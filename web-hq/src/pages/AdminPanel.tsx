@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { adminApi, wsClient } from '../services/api';
-import { Shield, CheckCircle, XCircle, Loader2, RefreshCw, Search, Bot, Users, UserCheck, Trash2, Cpu, Radio } from 'lucide-react';
+import { adminApi, orchestrationApi, wsClient } from '../services/api';
+import { Shield, CheckCircle, XCircle, Loader2, RefreshCw, Search, Bot, Users, UserCheck, Trash2, Cpu, Radio, Zap } from 'lucide-react';
 
 const TYPE_META: Record<string, { icon: React.ReactNode; color: string; label: string }> = {
   pm:     { icon: <Cpu size={11} />,   color: '#f59e0b', label: 'PM' },
@@ -19,6 +19,8 @@ export default function AdminPanel() {
   const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
+  const [sweeping, setSweeping] = useState(false);
+  const [sweepResult, setSweepResult] = useState<{ scanned: number; assigned: number; skipped: number; errors: number } | null>(null);
 
   const fetchData = async () => {
     setLoading(true); setError(null);
@@ -83,6 +85,16 @@ export default function AdminPanel() {
     finally { setActLoad(null); }
   };
 
+  const runSweep = async () => {
+    setSweeping(true); setError(null); setOk(null); setSweepResult(null);
+    try {
+      const r = await orchestrationApi.sweep();
+      setSweepResult(r);
+      setOk(`Sweep complete — assigned: ${r.assigned}, skipped: ${r.skipped}, errors: ${r.errors}`);
+    } catch (e: any) { setError(e.message); }
+    finally { setSweeping(false); }
+  };
+
   const ago = (d: string) => { const diff = Date.now() - new Date(d).getTime(); const h = Math.floor(diff / 3600000); const day = Math.floor(h / 24); return day > 0 ? `${day}d ago` : h > 0 ? `${h}h ago` : 'just now'; };
 
   const filtPending = pending.filter(a => a.name?.toLowerCase().includes(search.toLowerCase()) || a.role?.toLowerCase().includes(search.toLowerCase()));
@@ -113,9 +125,14 @@ export default function AdminPanel() {
             <Shield size={18} style={{ color: 'var(--amber)' }} /> ADMIN PANEL
           </h1>
         </div>
-        <button onClick={fetchData} disabled={loading} className="ops-btn flex items-center gap-1">
-          <RefreshCw size={11} className={loading ? 'animate-spin' : ''} /> Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={runSweep} disabled={sweeping} className="ops-btn flex items-center gap-1" title="Auto-assign all pending unassigned tasks">
+            {sweeping ? <Loader2 size={11} className="animate-spin" /> : <Zap size={11} />} Auto-Assign
+          </button>
+          <button onClick={fetchData} disabled={loading} className="ops-btn flex items-center gap-1">
+            <RefreshCw size={11} className={loading ? 'animate-spin' : ''} /> Refresh
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -134,6 +151,11 @@ export default function AdminPanel() {
       {(error || ok) && (
         <div style={{ ...mono, fontSize: 11, color: error ? '#ef4444' : '#10b981', background: 'var(--ink-2)', border: `1px solid ${error ? '#7f1d1d' : '#064e3b'}`, borderRadius: 2, padding: '10px 14px' }}>
           {error || ok}
+          {sweepResult && !error && (
+            <span style={{ marginLeft: 12, opacity: 0.7 }}>
+              (scanned: {sweepResult.scanned} / assigned: {sweepResult.assigned} / skipped: {sweepResult.skipped})
+            </span>
+          )}
         </div>
       )}
 
