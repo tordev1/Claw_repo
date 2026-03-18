@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { tasksApi, projectsApi, getPriorityLabel } from '../services/api';
+import { tasksApi, projectsApi, getPriorityLabel, wsClient } from '../services/api';
 import { Plus, Loader2, LayoutGrid, List } from 'lucide-react';
 import TaskCreationForm from '../components/TaskCreationForm';
 
@@ -44,6 +44,23 @@ export default function Tasks() {
   }, [selProj]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // Auto-refresh when orchestration assigns a task or a new task is created
+  const fetchAllRef = useRef(fetchAll);
+  fetchAllRef.current = fetchAll;
+  useEffect(() => {
+    const refresh = () => fetchAllRef.current();
+    wsClient.on('task:assigned', refresh);
+    wsClient.on('task:created', refresh);
+    wsClient.on('task:started', refresh);
+    wsClient.on('task:completed', refresh);
+    return () => {
+      wsClient.off('task:assigned', refresh);
+      wsClient.off('task:created', refresh);
+      wsClient.off('task:started', refresh);
+      wsClient.off('task:completed', refresh);
+    };
+  }, []);
 
   const mono: React.CSSProperties = { fontFamily: 'var(--font-mono)' };
 

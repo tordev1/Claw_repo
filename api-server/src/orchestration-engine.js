@@ -72,7 +72,6 @@ function selectCandidateAgents({ role, projectId }) {
            ON  t.agent_id = ma.id
            AND t.status   IN ('pending', 'running')
     WHERE  ma.is_approved = TRUE
-      AND  ma.status != 'offline'
       AND  ma.agent_type != 'pm'
     GROUP BY ma.id
   `).all(projectId);
@@ -80,10 +79,11 @@ function selectCandidateAgents({ role, projectId }) {
   const scored = agents.map(agent => {
     let score = 0;
 
-    // Status bonus
+    // Status bonus (offline agents can still be assigned — lower priority)
     if      (agent.status === 'online')  score += 10;
     else if (agent.status === 'idle')    score += 7;
     else if (agent.status === 'working') score += 3;
+    else if (agent.status === 'offline') score += 1; // last resort
 
     // Active task load penalty
     score -= (agent.active_task_count || 0) * 2;
@@ -143,11 +143,10 @@ function diagnoseMissingCandidates(db, projectId) {
                                AND ap.project_id = ?
                                AND ap.status = 'active'
       WHERE  ma.is_approved = TRUE
-        AND  ma.status != 'offline'
         AND  ma.agent_type != 'pm'
     `).get(projectId);
 
-    if (!onlineApproved || onlineApproved.cnt === 0) return 'no_online_non_pm_agents';
+    if (!onlineApproved || onlineApproved.cnt === 0) return 'no_eligible_non_pm_agents';
 
     return 'no_eligible_agents';
   } catch (e) {
