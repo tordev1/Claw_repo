@@ -44,7 +44,7 @@ export default function Dashboard() {
       const aList = ad.status === 'fulfilled' ? (ad.value.agents || ad.value || []) : [];
       setProjects(pList); setMachines(mList);
       let monthlyCost = 0;
-      try { const { costsApi } = await import('../services/api'); const c = await costsApi.getSummary(); monthlyCost = c?.total || 0; } catch {}
+      try { const { costsApi } = await import('../services/api'); const c = await costsApi.getSummary(); monthlyCost = c?.totalSpent || c?.total || 0; } catch {}
       setStats({ totalAgents: aList.length, activeProjects: pList.filter((p: any) => p.status === 'active').length, totalTasks: pList.reduce((s: number, p: any) => s + (p.stats?.activeTasks || 0), 0), monthlyCost, monthlyBudget: 275 });
     } catch (e: any) { setError(e.message); } finally { setLoading(false); }
   };

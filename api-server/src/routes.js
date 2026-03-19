@@ -97,11 +97,36 @@ async function listProjects(request, reply) {
   if (status) countQuery += ' WHERE status = ?';
   const { total } = db.prepare(countQuery).get(status ? [status] : []);
 
-  return {
-    projects: projects.map(p => ({
+  const projectsWithStats = projects.map(p => {
+    const taskStats = db.prepare(`
+      SELECT
+        COUNT(*) as totalTasks,
+        SUM(CASE WHEN status IN ('pending','running') THEN 1 ELSE 0 END) as activeTasks,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completedTasks
+      FROM tasks WHERE project_id = ?
+    `).get(p.id) || {};
+    const costStats = db.prepare(`
+      SELECT
+        SUM(CASE WHEN date(recorded_at) = date('now') THEN cost_usd ELSE 0 END) as todayCost,
+        SUM(CASE WHEN strftime('%Y-%m', recorded_at) = strftime('%Y-%m', 'now') THEN cost_usd ELSE 0 END) as monthCost
+      FROM cost_records WHERE project_id = ?
+    `).get(p.id) || {};
+    return {
       ...p,
-      config: JSON.parse(p.config || '{}')
-    })),
+      config: JSON.parse(p.config || '{}'),
+      stats: {
+        totalTasks:    taskStats.totalTasks    || 0,
+        activeTasks:   taskStats.activeTasks   || 0,
+        completedTasks:taskStats.completedTasks || 0,
+        todayCost:     parseFloat((costStats.todayCost  || 0).toFixed(4)),
+        monthCost:     parseFloat((costStats.monthCost  || 0).toFixed(4)),
+        monthBudget:   0
+      }
+    };
+  });
+
+  return {
+    projects: projectsWithStats,
     total,
     limit: parseInt(limit),
     offset: parseInt(offset)
