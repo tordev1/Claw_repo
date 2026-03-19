@@ -2834,25 +2834,38 @@ async function listAgents(request, reply) {
   const db = getDb();
   const { is_approved, role } = request.query;
 
-  let query = 'SELECT * FROM manager_agents WHERE 1=1';
+  let where = 'WHERE 1=1';
   const params = [];
 
   if (is_approved !== undefined) {
-    query += ' AND is_approved = ?';
+    where += ' AND ma.is_approved = ?';
     params.push(is_approved ? 1 : 0);
   }
 
   if (role) {
-    query += ' AND role = ?';
+    where += ' AND ma.role = ?';
     params.push(role);
   }
 
-  query += ' ORDER BY created_at DESC';
+  // Use agent_projects as the source of truth for project assignment.
+  // COALESCE: prefer agent_projects assignment, fall back to ma.project_id (CLI-set).
+  const query = `
+    SELECT ma.*,
+      COALESCE(
+        (SELECT ap.project_id FROM agent_projects ap
+         WHERE ap.agent_id = ma.id AND ap.status = 'active'
+         ORDER BY ap.assigned_at DESC LIMIT 1),
+        ma.project_id
+      ) AS effective_project_id
+    FROM manager_agents ma
+    ${where}
+    ORDER BY ma.created_at DESC
+  `;
 
   const agents = db.prepare(query).all(...params);
 
   return {
-    agents: agents.map(formatAgentResponse),
+    agents: agents.map(a => ({ ...formatAgentResponse(a), project_id: a.effective_project_id || null })),
     count: agents.length
   };
 }
@@ -3620,27 +3633,40 @@ async function listManagerAgentsRoute(request, reply) {
     return { error: 'Admin access required' };
   }
 
-  let query = 'SELECT * FROM manager_agents WHERE 1=1';
+  let where = 'WHERE 1=1';
   const params = [];
 
   if (status) {
-    query += ' AND status = ?';
+    where += ' AND ma.status = ?';
     params.push(status);
   }
 
   if (is_approved !== undefined) {
-    query += ' AND is_approved = ?';
+    where += ' AND ma.is_approved = ?';
     params.push(is_approved === 'true' ? 1 : 0);
   }
 
-  query += ' ORDER BY created_at DESC';
+  // Use agent_projects junction table as source of truth for project assignment
+  const query = `
+    SELECT ma.*,
+      COALESCE(
+        (SELECT ap.project_id FROM agent_projects ap
+         WHERE ap.agent_id = ma.id AND ap.status = 'active'
+         ORDER BY ap.assigned_at DESC LIMIT 1),
+        ma.project_id
+      ) AS effective_project_id
+    FROM manager_agents ma
+    ${where}
+    ORDER BY ma.created_at DESC
+  `;
 
   const agents = db.prepare(query).all(...params);
 
   return {
     agents: agents.map(a => {
       const formatted = formatAgentResponse(a);
-      delete formatted.api_keys; // Don't expose API keys in list
+      delete formatted.api_keys;
+      formatted.project_id = a.effective_project_id || null;
       return formatted;
     }),
     count: agents.length
