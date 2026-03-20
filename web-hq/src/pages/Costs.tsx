@@ -33,7 +33,7 @@ export default function Costs() {
     try {
       setLoading(true); setError(null);
       const days = PERIOD_DAYS[period];
-      const dashboard = await tokensApi.getDashboard();
+      const dashboard = await tokensApi.getDashboard(days);
       setDash(dashboard);
 
       const extractDaily = (r: any): UsagePoint[] =>
@@ -58,13 +58,13 @@ export default function Costs() {
       }
 
       try {
-        const md = await tokensApi.getAllModels();
+        const md = await tokensApi.getAllModels(days);
         setModels(md.models || []);
       } catch {
         const ms: ModelData[] = [];
         for (const p of dashboard.providers) {
           try {
-            const pd = await tokensApi.getProvider(p.name);
+            const pd = await tokensApi.getProvider(p.name, days);
             ms.push(...(pd.models || []).map((m: any) => ({ name: m.name, provider: p.name, tokens: m.tokens || 0, cost: m.cost || 0 })));
           } catch { /* skip */ }
         }
@@ -257,7 +257,8 @@ export default function Costs() {
             <tbody>
               {shownModels.slice(0, 10).map(m => {
                 const cfg = PROVIDER_CFG[m.provider] || { color: 'var(--text-lo)', label: m.provider };
-                const pct = shownModels[0]?.cost ? (m.cost / shownModels[0].cost) * 100 : 0;
+                const totalCost = shownModels.reduce((sum, x) => sum + x.cost, 0);
+                const pct = totalCost > 0 ? (m.cost / totalCost) * 100 : 0;
                 return (
                   <tr key={m.name + m.provider}>
                     <td style={{ maxWidth: 160 }}><span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.name}>{m.name}</span></td>

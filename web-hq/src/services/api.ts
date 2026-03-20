@@ -532,10 +532,10 @@ export const creditsApi = {
 // Tokens API - NEW working endpoints
 export const tokensApi = {
   // Get dashboard summary
-  getDashboard: () => fetchApi('/api/tokens/dashboard'),
+  getDashboard: (days?: number) => fetchApi(`/api/tokens/dashboard${days ? `?days=${days}` : ''}`),
 
   // Get provider details
-  getProvider: (provider: string) => fetchApi(`/api/tokens/providers/${provider}`),
+  getProvider: (provider: string, days?: number) => fetchApi(`/api/tokens/providers/${provider}${days ? `?days=${days}` : ''}`),
 
   // Get usage data with time period
   getUsage: (params?: { days?: number; from?: string; to?: string }) => {
@@ -553,7 +553,7 @@ export const tokensApi = {
   },
 
   // Get all models
-  getAllModels: () => fetchApi('/api/tokens/models'),
+  getAllModels: (days?: number) => fetchApi(`/api/tokens/models${days ? `?days=${days}` : ''}`),
 };
 
 // WebSocket client

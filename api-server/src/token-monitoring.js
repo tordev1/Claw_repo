@@ -41,9 +41,21 @@ function getMonthBounds(month) {
   return { start, end };
 }
 
-async function getDashboardSummary(month) {
+function getDaysBounds(days) {
+  const now = new Date();
+  const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
+  const end   = new Date(now.getTime() + 1000).toISOString(); // +1s to include current moment
+  return { start, end };
+}
+
+function resolveBounds(month, days) {
+  if (days && Number(days) > 0) return getDaysBounds(Number(days));
+  return getMonthBounds(month);
+}
+
+async function getDashboardSummary(month, days) {
   const db = getDb();
-  const { start, end } = getMonthBounds(month);
+  const { start, end } = resolveBounds(month, days);
 
   const rows = db.prepare(`
     SELECT provider,
@@ -91,12 +103,12 @@ async function getDashboardSummary(month) {
   };
 }
 
-async function getProviderDetails(providerName, month) {
+async function getProviderDetails(providerName, month, days) {
   const key = normalizeProvider(providerName);
   if (!PROVIDER_BUDGETS[key]) return { error: 'Unknown provider', validProviders: Object.keys(PROVIDER_BUDGETS) };
 
   const db = getDb();
-  const { start, end } = getMonthBounds(month);
+  const { start, end } = resolveBounds(month, days);
 
   const stats = db.prepare(`
     SELECT SUM(cost_usd) AS total_cost, SUM(total_tokens) AS total_tokens,
@@ -129,10 +141,10 @@ async function getProviderDetails(providerName, month) {
   };
 }
 
-async function getDailyUsage(providerName, month) {
+async function getDailyUsage(providerName, month, days) {
   const key = normalizeProvider(providerName);
   const db  = getDb();
-  const { start, end } = getMonthBounds(month);
+  const { start, end } = resolveBounds(month, days);
 
   const daily = db.prepare(`
     SELECT strftime('%Y-%m-%d', recorded_at) AS date,
@@ -150,9 +162,9 @@ async function getDailyUsage(providerName, month) {
   };
 }
 
-async function getModelsBreakdown(month) {
+async function getModelsBreakdown(month, days) {
   const db = getDb();
-  const { start, end } = getMonthBounds(month);
+  const { start, end } = resolveBounds(month, days);
 
   const models = db.prepare(`
     SELECT model AS name, provider,
