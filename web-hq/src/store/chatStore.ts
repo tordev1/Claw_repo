@@ -26,7 +26,7 @@ export interface Message {
 export interface Channel {
   id: string;
   name: string;
-  type: 'general' | 'project' | 'dm';
+  type: 'general' | 'project' | 'dm' | 'rnd_feed' | 'agent_bus';
   description?: string;
   color?: string;
   project_id?: string;
@@ -35,6 +35,7 @@ export interface Channel {
   dm_agent_id?: string;
   dm_agent_name?: string;
   dm_agent_role?: string;
+  dm_agent_type?: string;
   dm_agent_status?: 'online' | 'offline';
   dm_user_id?: string;
   unread_count?: number;

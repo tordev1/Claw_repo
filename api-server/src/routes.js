@@ -2148,6 +2148,7 @@ async function listChannelsRoute(request, reply) {
         ma.name as dm_agent_name,
         ma.avatar_url as dm_agent_avatar,
         ma.role as dm_agent_role,
+        ma.agent_type as dm_agent_type,
         ma.status as dm_agent_status,
         (
           SELECT COUNT(*) FROM messages m
@@ -2169,10 +2170,12 @@ async function listChannelsRoute(request, reply) {
       params.push(type);
     }
 
-    // Non-admins only see channels they belong to
+    // Non-admins only see channels they belong to (rnd_feed and agent_bus are global)
     if (request.user?.role !== 'admin') {
       query += ` AND (
         c.type = 'general'
+        OR c.type = 'rnd_feed'
+        OR c.type = 'agent_bus'
         OR c.created_by = ?
         OR c.dm_user_id = ?
         OR c.participant_1_id = ?
@@ -2202,6 +2205,7 @@ async function listChannelsRoute(request, reply) {
         dm_agent_name: c.dm_agent_name,
         dm_agent_avatar: c.dm_agent_avatar,
         dm_agent_role: c.dm_agent_role,
+        dm_agent_type: c.dm_agent_type,
         dm_agent_status: c.dm_agent_status || 'offline',
         unread_count: c.unread_count || 0,
         created_at: c.created_at,
@@ -2322,10 +2326,12 @@ async function sendChannelMessageRoute(request, reply) {
     return { error: 'Channel not found' };
   }
 
-  // Check membership - allow general channels, DM participants, and channel members
+  // Check membership - allow general, rnd_feed, agent_bus, DM participants, and channel members
   if (request.user?.role !== 'admin' && !agentId) {
     const isParticipant =
       channel.type === 'general' ||
+      channel.type === 'rnd_feed' ||
+      channel.type === 'agent_bus' ||
       channel.created_by === userId ||
       channel.dm_user_id === userId ||
       channel.participant_1_id === userId ||
@@ -2343,6 +2349,18 @@ async function sendChannelMessageRoute(request, reply) {
     metadata: { ...metadata, channel_name: channel.name },
     agentId,
   });
+
+  // Mirror agent_bus messages to their project channel
+  if (channel.type === 'agent_bus' && channel.project_id) {
+    const projectChannel = db.prepare("SELECT id FROM channels WHERE project_id = ? AND type = 'project'").get(channel.project_id);
+    if (projectChannel) {
+      const mirrorContent = `**[Internal Bus]** ${message.sender_name || 'Agent'}: ${content}`;
+      await sendChannelMessage(userId, projectChannel.id, mirrorContent, {
+        metadata: { mirrored_from: channel.id, mirrored_from_type: 'agent_bus', original_message_id: message.id },
+        agentId,
+      });
+    }
+  }
 
   reply.code(201);
   return { message };
@@ -4509,7 +4527,7 @@ async function autoAssignAgentRoute(request, reply) {
 // GET /api/tokens/dashboard - Full token dashboard
 async function getTokenDashboardRoute(request, reply) {
   try {
-    const result = await getDashboardSummary(request.query?.month);
+    const result = await getDashboardSummary(request.query?.month, request.query?.days);
     return result;
   } catch (err) {
     reply.code(500);
@@ -4716,8 +4734,8 @@ async function createProjectChannelRoute(request, reply) {
 // GET /api/tokens/dashboard - Overall summary across all providers
 async function getTokensDashboardRoute(request, reply) {
   try {
-    const { month } = request.query;
-    const result = await getDashboardSummary(month);
+    const { month, days } = request.query;
+    const result = await getDashboardSummary(month, days);
     return result;
   } catch (err) {
     reply.code(500);
@@ -4729,8 +4747,8 @@ async function getTokensDashboardRoute(request, reply) {
 async function getTokensProviderRoute(request, reply) {
   try {
     const { provider } = request.params;
-    const { month } = request.query;
-    const result = await getProviderDetails(provider, month);
+    const { month, days } = request.query;
+    const result = await getProviderDetails(provider, month, days);
 
     if (result.error) {
       reply.code(400);
@@ -4745,13 +4763,12 @@ async function getTokensProviderRoute(request, reply) {
 // GET /api/tokens/usage - Daily usage for charts
 async function getTokensUsageRoute(request, reply) {
   try {
-    const { provider } = request.query;
+    const { provider, month, days } = request.query;
     if (!provider) {
       reply.code(400);
       return { error: 'provider query parameter is required' };
     }
-    const { month } = request.query;
-    const result = await getDailyUsage(provider, month);
+    const result = await getDailyUsage(provider, month, days);
     return result;
   } catch (err) {
     reply.code(500);
@@ -4762,8 +4779,8 @@ async function getTokensUsageRoute(request, reply) {
 // GET /api/tokens/models - Per-model breakdown
 async function getTokensModelsRoute(request, reply) {
   try {
-    const { month } = request.query;
-    const result = await getModelsBreakdown(month);
+    const { month, days } = request.query;
+    const result = await getModelsBreakdown(month, days);
     return result;
   } catch (err) {
     reply.code(500);

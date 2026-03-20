@@ -77,7 +77,7 @@ export default function Chat({ currentUser }: ChatProps) {
 
   const channelsByType = Object.values(channels).reduce(
     (acc, ch) => { acc[ch.type]?.push(ch); return acc; },
-    { general: [] as Channel[], project: [] as Channel[], dm: [] as Channel[] }
+    { general: [] as Channel[], project: [] as Channel[], dm: [] as Channel[], rnd_feed: [] as Channel[], agent_bus: [] as Channel[] }
   );
 
   const endRef = useRef<HTMLDivElement>(null);
@@ -175,6 +175,12 @@ export default function Chat({ currentUser }: ChatProps) {
           color: active ? 'var(--amber)' : 'var(--text-mid)',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>{label}</span>
+        {ch.type === 'dm' && ch.dm_agent_type === 'pm' && (
+          <span key={`hotline-${ch.id}`} style={{
+            ...M, fontSize: 8, background: '#f59e0b18', color: '#f59e0b',
+            border: '1px solid #f59e0b44', borderRadius: 2, padding: '0px 4px', flexShrink: 0,
+          }}>PM</span>
+        )}
         {(ch.unread_count || 0) > 0 && (
           <span key={`unread-${ch.id}`} style={{
             ...M, fontSize: 9, background: '#ef4444', color: '#fff',
@@ -267,6 +273,32 @@ export default function Chat({ currentUser }: ChatProps) {
                 textTransform: 'uppercase', padding: '10px 10px 3px'
               }}>Direct Messages</div>
               {channelsByType.dm.map(ch => <ChBtn key={`ch-${ch.id}`} ch={ch} />)}
+            </>}
+
+            {/* Agent Bus */}
+            {channelsByType.agent_bus.length > 0 && <>
+              <div key="bus-header" style={{
+                ...M, fontSize: 9, color: '#a855f7', letterSpacing: '0.1em',
+                textTransform: 'uppercase', padding: '10px 10px 3px',
+                display: 'flex', alignItems: 'center', gap: 5,
+              }}>
+                <span>Agent Bus</span>
+                <span style={{ fontSize: 7, background: '#a855f718', border: '1px solid #a855f744', borderRadius: 2, padding: '0 3px', color: '#a855f7' }}>INTERNAL</span>
+              </div>
+              {channelsByType.agent_bus.map(ch => <ChBtn key={`ch-${ch.id}`} ch={ch} />)}
+            </>}
+
+            {/* R&D Feed */}
+            {channelsByType.rnd_feed.length > 0 && <>
+              <div key="rnd-header" style={{
+                ...M, fontSize: 9, color: '#06b6d4', letterSpacing: '0.1em',
+                textTransform: 'uppercase', padding: '10px 10px 3px',
+                display: 'flex', alignItems: 'center', gap: 5,
+              }}>
+                <span>R&D Feed</span>
+                <span style={{ fontSize: 7, background: '#06b6d418', border: '1px solid #06b6d444', borderRadius: 2, padding: '0 3px', color: '#06b6d4' }}>AUTO</span>
+              </div>
+              {channelsByType.rnd_feed.map(ch => <ChBtn key={`ch-${ch.id}`} ch={ch} />)}
             </>}
           </div>
         )}
@@ -396,6 +428,12 @@ export default function Chat({ currentUser }: ChatProps) {
               <span key="dm-name" style={{ ...M, fontSize: 13, fontWeight: 700, color: 'var(--text-hi)' }}>
                 {selectedCh.dm_agent_name || selectedCh.name}
               </span>
+              {selectedCh.dm_agent_type === 'pm' && (
+                <span key="dm-hotline-badge" style={{
+                  ...M, fontSize: 9, padding: '2px 7px', borderRadius: 2,
+                  background: '#f59e0b18', border: '1px solid #f59e0b44', color: '#f59e0b',
+                }}>PM HOTLINE</span>
+              )}
               <span key="dm-status" style={{
                 ...M, fontSize: 9, padding: '2px 7px', borderRadius: 2,
                 background: selectedCh.dm_agent_status === 'online' ? '#10b98115' : '#4b556315',
@@ -405,10 +443,25 @@ export default function Chat({ currentUser }: ChatProps) {
             </>
           ) : (
             <>
-              <Hash key="channel-hash" size={12} style={{ color: 'var(--amber)', flexShrink: 0 }} />
+              <Hash key="channel-hash" size={12} style={{
+                color: selectedCh?.type === 'rnd_feed' ? '#06b6d4' : selectedCh?.type === 'agent_bus' ? '#a855f7' : 'var(--amber)',
+                flexShrink: 0
+              }} />
               <span key="channel-name" style={{ ...M, fontSize: 13, fontWeight: 700, color: 'var(--text-hi)' }}>
                 {selectedCh?.name?.replace('project-', '') || '—'}
               </span>
+              {selectedCh?.type === 'rnd_feed' && (
+                <span key="rnd-badge" style={{
+                  ...M, fontSize: 9, padding: '2px 7px', borderRadius: 2,
+                  background: '#06b6d418', border: '1px solid #06b6d444', color: '#06b6d4',
+                }}>R&D FEED</span>
+              )}
+              {selectedCh?.type === 'agent_bus' && (
+                <span key="bus-badge" style={{
+                  ...M, fontSize: 9, padding: '2px 7px', borderRadius: 2,
+                  background: '#a855f718', border: '1px solid #a855f744', color: '#a855f7',
+                }}>INTERNAL BUS</span>
+              )}
               {selectedCh?.description && (
                 <span key="channel-desc" style={{
                   ...M, fontSize: 10, color: 'var(--text-lo)',
@@ -519,26 +572,70 @@ export default function Chat({ currentUser }: ChatProps) {
                             )}
                           </div>
                         )}
-                        <div key={`bubble-${messageKey}`} style={{
-                          display: 'inline-block', textAlign: 'left', maxWidth: '76%',
-                          background: isMe ? 'var(--amber)1a' : 'var(--ink-3)',
-                          border: `1px solid ${isMe ? 'var(--amber)44' : 'var(--ink-4)'}`,
-                          borderRadius: 2, padding: '6px 11px',
-                        }}>
-                          <div style={{
-                            ...M, fontSize: 12, color: 'var(--text-hi)', lineHeight: 1.6,
-                            whiteSpace: 'pre-wrap', wordBreak: 'break-word'
+                        {/* R&D Finding card */}
+                        {msg.metadata?.type === 'rnd_finding' ? (
+                          <div key={`rnd-card-${messageKey}`} style={{
+                            textAlign: 'left', maxWidth: '90%',
+                            background: '#06b6d40a', border: '1px solid #06b6d430',
+                            borderLeft: '3px solid #06b6d4', borderRadius: 2, padding: '8px 12px',
                           }}>
-                            {msg.content.split(/(@\w+)/g).map((part, i) =>
-                              part.startsWith('@') ? (
-                                <span key={`mention-${i}-${messageKey}`} style={{
-                                  color: 'var(--amber)', background: 'var(--amber)18',
-                                  borderRadius: 2, padding: '0 3px',
-                                }}>{part}</span>
-                              ) : <span key={`text-${i}-${messageKey}`}>{part}</span>
-                            )}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                              <span style={{ ...M, fontSize: 9, color: '#06b6d4', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+                                R&D · {msg.metadata.division?.replace(/_/g, ' ')}
+                              </span>
+                              {msg.metadata.impact_level && (
+                                <span style={{
+                                  ...M, fontSize: 8, borderRadius: 2, padding: '1px 5px',
+                                  background: msg.metadata.impact_level === 'critical' ? '#ef444420' : msg.metadata.impact_level === 'high' ? '#f9731620' : msg.metadata.impact_level === 'medium' ? '#f59e0b20' : '#10b98120',
+                                  border: `1px solid ${msg.metadata.impact_level === 'critical' ? '#ef444460' : msg.metadata.impact_level === 'high' ? '#f9731660' : msg.metadata.impact_level === 'medium' ? '#f59e0b60' : '#10b98160'}`,
+                                  color: msg.metadata.impact_level === 'critical' ? '#ef4444' : msg.metadata.impact_level === 'high' ? '#f97316' : msg.metadata.impact_level === 'medium' ? '#f59e0b' : '#10b981',
+                                  textTransform: 'uppercase',
+                                }}>{msg.metadata.impact_level}</span>
+                              )}
+                              {msg.metadata.model && (
+                                <span style={{ ...M, fontSize: 8, color: 'var(--text-lo)', marginLeft: 'auto' }}>{msg.metadata.model}</span>
+                              )}
+                            </div>
+                            <div style={{ ...M, fontSize: 11, color: 'var(--text-hi)', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                              {msg.content}
+                            </div>
                           </div>
-                        </div>
+                        ) : msg.metadata?.mirrored_from_type === 'agent_bus' ? (
+                          /* Mirrored agent bus message */
+                          <div key={`mirror-${messageKey}`} style={{
+                            textAlign: 'left', maxWidth: '76%',
+                            background: '#a855f70a', border: '1px solid #a855f730',
+                            borderLeft: '3px solid #a855f7', borderRadius: 2, padding: '6px 11px',
+                          }}>
+                            <div style={{ ...M, fontSize: 8, color: '#a855f7', letterSpacing: '0.08em', marginBottom: 4, textTransform: 'uppercase' }}>
+                              ↳ Mirrored from Agent Bus
+                            </div>
+                            <div style={{ ...M, fontSize: 12, color: 'var(--text-hi)', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                              {msg.content}
+                            </div>
+                          </div>
+                        ) : (
+                          <div key={`bubble-${messageKey}`} style={{
+                            display: 'inline-block', textAlign: 'left', maxWidth: '76%',
+                            background: isMe ? 'var(--amber)1a' : 'var(--ink-3)',
+                            border: `1px solid ${isMe ? 'var(--amber)44' : 'var(--ink-4)'}`,
+                            borderRadius: 2, padding: '6px 11px',
+                          }}>
+                            <div style={{
+                              ...M, fontSize: 12, color: 'var(--text-hi)', lineHeight: 1.6,
+                              whiteSpace: 'pre-wrap', wordBreak: 'break-word'
+                            }}>
+                              {msg.content.split(/(@\w+)/g).map((part, i) =>
+                                part.startsWith('@') ? (
+                                  <span key={`mention-${i}-${messageKey}`} style={{
+                                    color: 'var(--amber)', background: 'var(--amber)18',
+                                    borderRadius: 2, padding: '0 3px',
+                                  }}>{part}</span>
+                                ) : <span key={`text-${i}-${messageKey}`}>{part}</span>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );

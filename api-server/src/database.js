@@ -304,7 +304,7 @@ class SQLiteAdapter {
       CREATE TABLE IF NOT EXISTS channels (
         id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
         name TEXT NOT NULL,
-        type TEXT CHECK(type IN ('general', 'project', 'dm', 'rnd_feed')) NOT NULL DEFAULT 'general',
+        type TEXT CHECK(type IN ('general', 'project', 'dm', 'rnd_feed', 'agent_bus')) NOT NULL DEFAULT 'general',
         created_by TEXT REFERENCES users(id),
         project_id TEXT REFERENCES projects(id),
         participant_1_id TEXT REFERENCES users(id),
@@ -477,6 +477,52 @@ class SQLiteAdapter {
     if (!rndFeedExists) {
       this.db.prepare("INSERT INTO channels (id, name, type, created_at) VALUES (?, 'R&D Feed', 'rnd_feed', datetime('now'))").run(generateId());
       console.log('✅ Created R&D Feed channel');
+    }
+
+    // Migrate channels table to add agent_bus type if missing
+    try {
+      const channelSchema2 = this.db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='channels'`).get();
+      if (channelSchema2?.sql && !channelSchema2.sql.includes('agent_bus')) {
+        console.log('🔧 Migrating channels table - adding agent_bus type...');
+        const migrateAgentBus = this.db.transaction(() => {
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS channels_new (
+              id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+              name TEXT NOT NULL,
+              type TEXT CHECK(type IN ('general', 'project', 'dm', 'rnd_feed', 'agent_bus')) NOT NULL DEFAULT 'general',
+              created_by TEXT REFERENCES users(id),
+              project_id TEXT REFERENCES projects(id),
+              participant_1_id TEXT REFERENCES users(id),
+              participant_2_id TEXT REFERENCES users(id),
+              is_dm INTEGER DEFAULT 0,
+              dm_user_id TEXT REFERENCES users(id),
+              dm_agent_id TEXT,
+              is_archived BOOLEAN DEFAULT FALSE,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+          `);
+          this.db.prepare(`INSERT OR IGNORE INTO channels_new SELECT * FROM channels`).run();
+          this.db.exec(`DROP TABLE channels`);
+          this.db.exec(`ALTER TABLE channels_new RENAME TO channels`);
+          this.db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_channels_type ON channels(type);
+            CREATE INDEX IF NOT EXISTS idx_channels_project ON channels(project_id);
+            CREATE INDEX IF NOT EXISTS idx_channels_is_dm ON channels(is_dm);
+            CREATE INDEX IF NOT EXISTS idx_channels_archived ON channels(is_archived)
+          `);
+        });
+        migrateAgentBus();
+        console.log('✅ channels table migrated (agent_bus added)');
+      }
+    } catch (migErr) {
+      console.warn('channels agent_bus migration skipped:', migErr.message);
+    }
+
+    // Insert default 'agent_bus' channel if not exists
+    const agentBusExists = this.db.prepare("SELECT id FROM channels WHERE type = 'agent_bus' AND name = 'Agent Bus'").get();
+    if (!agentBusExists) {
+      this.db.prepare("INSERT INTO channels (id, name, type, created_at) VALUES (?, 'Agent Bus', 'agent_bus', datetime('now'))").run(generateId());
+      console.log('✅ Created Agent Bus channel');
     }
 
     // Machines table (for Mac Mini and other hardware)
