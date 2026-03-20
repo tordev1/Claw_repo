@@ -795,9 +795,9 @@ async function assignTask(request, reply) {
       userId, now);
   } catch (e) { /* ignore */ }
 
-  // Update agent status: if agent now has running tasks → working, else they stay as-is
-  // (The task is still pending until started, so just update previous agent if any)
+  // Update agent statuses: free the previous agent, mark new agent as working
   syncAgentStatus(db, previousAgentId);
+  syncAgentStatus(db, agent_id);
 
   return {
     id,
@@ -1338,7 +1338,7 @@ function syncAgentStatus(db, agentId) {
   if (!agentId) return;
   try {
     const { count } = db.prepare(
-      "SELECT COUNT(*) as count FROM tasks WHERE agent_id = ? AND status = 'running'"
+      "SELECT COUNT(*) as count FROM tasks WHERE agent_id = ? AND status IN ('pending', 'running')"
     ).get(agentId);
     const newStatus = count > 0 ? 'working' : 'idle';
     db.prepare("UPDATE manager_agents SET status = ? WHERE id = ?").run(newStatus, agentId);
