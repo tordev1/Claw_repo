@@ -142,13 +142,12 @@ async function getClaudeUsage() {
 
 // Aggregate all
 async function getAllRealCosts() {
-  const [kimi, openai, claude] = await Promise.all([
-    getKimiUsage(),
+  const [openai, claude] = await Promise.all([
     getOpenAIUsage(),
     getClaudeUsage()
   ]);
 
-  const providers = [kimi, openai, claude].filter(p => p !== null);
+  const providers = [openai, claude].filter(p => p !== null);
   const totalSpent = providers.reduce((sum, p) => sum + p.creditUsed, 0);
   const totalBudget = providers.reduce((sum, p) => sum + p.creditTotal, 0);
   const totalTokens = providers.reduce((sum, p) => sum + (p.tokens?.total || 0), 0);

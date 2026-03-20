@@ -4539,10 +4539,10 @@ async function getTokenDashboardRoute(request, reply) {
 async function getProviderTokensRoute(request, reply) {
   try {
     const { provider } = request.params;
-    const validProviders = ['kimi', 'openai', 'anthropic', 'claude'];
+    const validProviders = ['openai', 'anthropic', 'claude'];
     if (!validProviders.includes(provider)) {
       reply.code(400);
-      return { error: 'Unknown provider. Use: kimi, openai, or anthropic' };
+      return { error: 'Unknown provider. Use: openai or anthropic/claude' };
     }
     const result = await getProviderDetails(provider, request.query?.month);
     return result;

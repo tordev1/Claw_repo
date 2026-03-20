@@ -7,7 +7,7 @@ export const tokenDashboardApi = {
   getDashboard: () => fetchApi('/api/tokens/dashboard'),
   
   // Get individual provider usage
-  getProvider: (provider: 'kimi' | 'openai' | 'anthropic') => 
+  getProvider: (provider: 'openai' | 'anthropic') =>
     fetchApi(`/api/tokens/providers/${provider}`),
   
   // Get context token stats
@@ -33,20 +33,13 @@ export const tokenDashboardApi = {
 
 // Provider colors matching backend
 export const PROVIDER_COLORS = {
-  kimi: '#10b981',      // Green
-  openai: '#6366f1',    // Indigo  
+  openai: '#6366f1',    // Indigo
   anthropic: '#f59e0b', // Amber
   default: '#64748b',
 };
 
 // Provider icons/names
 export const PROVIDER_INFO = {
-  kimi: {
-    name: 'Kimi (Moonshot)',
-    shortName: 'Kimi',
-    contextWindow: 128000,
-    currency: 'CNY'
-  },
   openai: {
     name: 'OpenAI',
     shortName: 'OpenAI',

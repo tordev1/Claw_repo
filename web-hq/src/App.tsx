@@ -29,6 +29,8 @@ const RndPanel = lazy(() => import('./pages/RndPanel'));
 const ProjectAssignmentBoard = lazy(() => import('./pages/ProjectAssignmentBoard'));
 const Docs = lazy(() => import('./pages/Docs'));
 const Fleet = lazy(() => import('./pages/Fleet'));
+const Presets = lazy(() => import('./pages/Presets'));
+const SystemHealth = lazy(() => import('./pages/SystemHealth'));
 
 function PageLoader() {
   return (
@@ -239,6 +241,8 @@ function App() {
             <Route path="/assign" element={<ProjectAssignmentBoard />} />
             <Route path="/docs" element={<Docs />} />
             <Route path="/fleet" element={<Fleet />} />
+            <Route path="/presets" element={<Presets />} />
+            <Route path="/health" element={<SystemHealth />} />
             <Route
               path="/rnd"
               element={

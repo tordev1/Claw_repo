@@ -8,7 +8,6 @@ const { getDb } = require('./database');
 
 // Budget config (only hardcoded values — intentional)
 const PROVIDER_BUDGETS = {
-  kimi:   { budget: 55 },
   openai: { budget: 120 },
   claude: { budget: 100 }
 };
@@ -16,7 +15,6 @@ const PROVIDER_BUDGETS = {
 function normalizeProvider(provider) {
   if (!provider) return 'unknown';
   const p = provider.toLowerCase().trim();
-  if (p.includes('kimi') || p.includes('moonshot')) return 'kimi';
   if (p.includes('openai') || p.includes('gpt') || p.includes('o1') || p.includes('o3')) return 'openai';
   if (p.includes('claude') || p.includes('anthropic')) return 'claude';
   return p;

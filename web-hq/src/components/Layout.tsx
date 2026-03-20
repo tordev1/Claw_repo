@@ -4,7 +4,7 @@ import {
   LayoutDashboard, FolderKanban, CheckSquare, DollarSign,
   Activity, Settings, MessageSquare, Bot, Menu, X,
   LogOut, ChevronRight, Shield, Coins, UserPlus, Radio, Shuffle,
-  Zap, BookOpen, FlaskConical, Server, Sun, Moon
+  Zap, BookOpen, FlaskConical, Server, Sun, Moon, SlidersHorizontal, HeartPulse
 } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 
@@ -27,6 +27,8 @@ const NAV = [
   { path: '/costs',   icon: DollarSign,      label: 'Costs',     group: 'ops' },
   { path: '/tokens',  icon: Coins,           label: 'Tokens',    group: 'ops' },
   { path: '/activity',icon: Activity,        label: 'Activity',  group: 'ops' },
+  { path: '/presets', icon: SlidersHorizontal,label: 'Presets',  group: 'ops' },
+  { path: '/health',  icon: HeartPulse,      label: 'Health',    group: 'ops' },
 ];
 
 const ADMIN_NAV = [

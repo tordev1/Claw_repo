@@ -50,7 +50,7 @@ export default function TokenDashboard() {
       const mp = '?month=' + selectedMonth;
       const [live, usage] = await Promise.all([
         apiFetch('/api/tokens/live' + mp),
-        apiFetch('/api/tokens/usage?provider=kimi&month=' + selectedMonth).catch(() => ({ daily: [] })),
+        apiFetch('/api/tokens/usage?month=' + selectedMonth).catch(() => ({ daily: [] })),
       ]);
       setData(live);
       setDaily(usage?.daily || []);
@@ -75,7 +75,6 @@ export default function TokenDashboard() {
     </div>
   );
 
-  const kimi = data?.kimi;
   const totals = data?.totals || {};
   const agents = data?.agents || [];
   const providers = data?.providers || [];
@@ -116,36 +115,6 @@ export default function TokenDashboard() {
         </div>
       </div>
 
-      {/* KIMI LIVE BALANCE — top card if API key configured */}
-      {kimi ? (
-        <div className="ops-panel p-5" style={{ borderColor: '#4287f530', background: 'linear-gradient(135deg, var(--ink-2) 0%, #4287f508 100%)' }}>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4287f5', display: 'inline-block' }} />
-              <span className="ops-section-header" style={{ marginBottom: 0, color: '#4287f5' }}>KIMI / MOONSHOT — LIVE BALANCE</span>
-            </div>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-lo)', letterSpacing: '0.1em' }}>LIVE · {kimi.currency}</span>
-          </div>
-          <div className="grid grid-cols-3 gap-4">
-            {[
-              { label: 'Cash Balance', val: fmtCNY(kimi.cashBalance), color: '#10b981' },
-              { label: 'Voucher Balance', val: fmtCNY(kimi.voucherBalance), color: '#60a5fa' },
-              { label: 'Total Available', val: fmtCNY(kimi.totalBalance), color: '#faa81a' },
-            ].map(s => (
-              <div key={s.label} style={{ textAlign: 'center' }}>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 26, fontWeight: 700, color: s.color }}>{s.val}</div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-lo)', marginTop: 4, textTransform: 'uppercase', letterSpacing: '0.1em' }}>{s.label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <div className="ops-panel p-4" style={{ borderStyle: 'dashed' }}>
-          <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-lo)', textAlign: 'center' }}>
-            MOONSHOT_API_KEY not configured — live balance unavailable
-          </p>
-        </div>
-      )}
 
       {/* THIS MONTH TOTALS */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -259,9 +228,9 @@ export default function TokenDashboard() {
           )}
         </div>
 
-        {/* Daily spend chart (Kimi) */}
+        {/* Daily spend chart */}
         <div className="ops-panel p-5">
-          <div className="ops-section-header mb-4">Daily Spend — Kimi</div>
+          <div className="ops-section-header mb-4">Daily Spend</div>
           {daily.length === 0 ? (
             <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-lo)' }}>— no data —</p>
@@ -275,7 +244,7 @@ export default function TokenDashboard() {
                   <YAxis tick={{ fontSize: 9, fontFamily: 'var(--font-mono)', fill: 'var(--text-lo)' }} tickFormatter={v => '$' + Number(v).toFixed(3)} width={48} axisLine={false} tickLine={false} />
                   <Tooltip contentStyle={{ background: 'var(--ink-2)', border: '1px solid var(--ink-4)', borderRadius: 2, fontFamily: 'var(--font-mono)', fontSize: 11 }}
                     formatter={(v: any) => [fmt$(Number(v)), 'Cost']} labelStyle={{ color: 'var(--text-mid)' }} />
-                  <Bar dataKey="cost" fill="#4287f5" opacity={0.85} radius={[1, 1, 0, 0]} />
+                  <Bar dataKey="cost" fill="var(--amber)" opacity={0.85} radius={[1, 1, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

@@ -9,9 +9,9 @@ interface UsagePoint { date: string; tokens: number; cost: number; requests: num
 interface ModelData { name: string; provider: string; tokens: number; cost: number; }
 
 const PROVIDER_CFG: Record<string, { color: string; label: string }> = {
-  kimi: { color: '#4287f5', label: 'KIMI' },
   openai: { color: '#10a37f', label: 'OPENAI' },
   claude: { color: '#faa81a', label: 'CLAUDE' },
+  anthropic: { color: '#faa81a', label: 'CLAUDE' },
 };
 
 type Period = '7d' | '30d' | '90d' | '3m' | '6m';
@@ -40,13 +40,12 @@ export default function Costs() {
         Array.isArray(r) ? r : (r?.daily ?? r?.data ?? []);
 
       if (tab === 'all') {
-        const [kd, od, cd] = await Promise.all([
-          tokensApi.getUsageByProvider('kimi', { days }),
+        const [od, cd] = await Promise.all([
           tokensApi.getUsageByProvider('openai', { days }),
           tokensApi.getUsageByProvider('claude', { days }),
         ]);
         const merged = new Map<string, UsagePoint>();
-        for (const day of [...extractDaily(kd), ...extractDaily(od), ...extractDaily(cd)]) {
+        for (const day of [...extractDaily(od), ...extractDaily(cd)]) {
           const e = merged.get(day.date);
           if (e) { e.tokens += day.tokens || 0; e.cost += day.cost || 0; e.requests += day.requests || 0; }
           else merged.set(day.date, { date: day.date, tokens: day.tokens || 0, cost: day.cost || 0, requests: day.requests || 0 });
@@ -161,7 +160,7 @@ export default function Costs() {
 
       {/* TABS */}
       <div className="flex gap-1" style={{ borderBottom: '1px solid var(--ink-4)' }}>
-        {['all', 'kimi', 'openai', 'claude'].map(t => {
+        {['all', 'openai', 'claude'].map(t => {
           const cfg = PROVIDER_CFG[t];
           const pd = dash?.providers.find(p => p.name === t);
           return (
