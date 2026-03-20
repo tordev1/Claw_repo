@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Loader2, RefreshCw, Bot, Server, Wifi, WifiOff, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+import { Loader2, RefreshCw, Bot, Server, Wifi, WifiOff, AlertTriangle, CheckCircle, Clock, FolderKanban, ListChecks, Coins, Activity } from 'lucide-react';
 
 const API_BASE = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001';
 
@@ -46,6 +46,14 @@ function isOfflineAlert(lastSeen: string | null, status: string): boolean {
 export default function SystemHealth() {
   const [agents, setAgents] = useState<any[]>([]);
   const [machines, setMachines] = useState<any[]>([]);
+  const [opsSummary, setOpsSummary] = useState({
+    projects: 0,
+    activeTasks: 0,
+    completedTasks: 0,
+    totalTokens: 0,
+    totalCost: 0,
+    requestCount: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -53,12 +61,26 @@ export default function SystemHealth() {
   const fetchAll = useCallback(async () => {
     try {
       setLoading(true); setError(null);
-      const [ag, mc] = await Promise.all([
+      const [ag, mc, pr, tk] = await Promise.all([
         apiFetch('/api/agents'),
         apiFetch('/api/machines').catch(() => ({ machines: [] })),
+        apiFetch('/api/projects').catch(() => ({ projects: [] })),
+        apiFetch('/api/tokens/live').catch(() => ({ totals: {} })),
       ]);
+      const projects = Array.isArray(pr) ? pr : (pr?.projects || []);
+      const activeTasks = projects.reduce((sum: number, p: any) => sum + (p?.stats?.activeTasks || 0), 0);
+      const completedTasks = projects.reduce((sum: number, p: any) => sum + (p?.stats?.completedTasks || 0), 0);
+
       setAgents(Array.isArray(ag) ? ag : (ag?.agents || []));
       setMachines(Array.isArray(mc) ? mc : (mc?.machines || []));
+      setOpsSummary({
+        projects: projects.length,
+        activeTasks,
+        completedTasks,
+        totalTokens: tk?.totals?.tokens || 0,
+        totalCost: tk?.totals?.cost || 0,
+        requestCount: tk?.totals?.requests || 0,
+      });
       setLastRefresh(new Date());
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
@@ -132,6 +154,26 @@ export default function SystemHealth() {
               <span style={{ color: s.color }}>{s.icon}</span>
             </div>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 700, color: s.color }}>{s.val}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Ops snapshot */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        {[
+          { label: 'Projects', val: opsSummary.projects, icon: <FolderKanban size={13} />, color: '#a78bfa' },
+          { label: 'Active Tasks', val: opsSummary.activeTasks, icon: <ListChecks size={13} />, color: '#38bdf8' },
+          { label: 'Completed Tasks', val: opsSummary.completedTasks, icon: <CheckCircle size={13} />, color: '#10b981' },
+          { label: 'Token Usage', val: opsSummary.totalTokens.toLocaleString(), icon: <Activity size={13} />, color: 'var(--amber)' },
+          { label: 'Cost (USD)', val: `$${Number(opsSummary.totalCost || 0).toFixed(4)}`, icon: <Coins size={13} />, color: '#f59e0b' },
+          { label: 'Requests', val: opsSummary.requestCount, icon: <Clock size={13} />, color: '#60a5fa' },
+        ].map((s) => (
+          <div key={s.label} className="ops-stat">
+            <div className="flex items-center justify-between mb-2">
+              <span className="ops-label">{s.label}</span>
+              <span style={{ color: s.color }}>{s.icon}</span>
+            </div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700, color: s.color }}>{s.val}</div>
           </div>
         ))}
       </div>

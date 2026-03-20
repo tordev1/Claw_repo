@@ -520,6 +520,9 @@ async function buildServer() {
   fastify.post('/api/agents/:id/notifications/:notificationId/read', { preHandler: authMiddleware }, routes.markAgentNotificationReadRoute);
   fastify.post('/api/agents/:id/message', { preHandler: authMiddleware }, routes.agentMessageRoute);
 
+  // Aggregated agent notifications feed
+  fastify.get('/api/notifications/agents/feed', { preHandler: authMiddleware }, routes.getAgentsFeedRoute);
+
   // User notifications
   fastify.get('/api/notifications', { preHandler: authMiddleware }, routes.getNotificationsRoute);
   fastify.post('/api/notifications/:id/read', { preHandler: authMiddleware }, routes.markNotificationReadRoute);

@@ -60,7 +60,10 @@ export default function AgentDetail() {
   const [agent, setAgent] = useState<ManagerAgent | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'tasks' | 'projects'>('tasks');
+  const [tab, setTab] = useState<'tasks' | 'projects' | 'notifications'>('tasks');
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifLoading, setNotifLoading] = useState(false);
+  const [notifUnread, setNotifUnread] = useState(0);
   const [presetOpen, setPresetOpen] = useState(false);
   const [presetContent, setPresetContent] = useState<PresetDetail | null>(null);
   const [presetLoading, setPresetLoading] = useState(false);
@@ -91,6 +94,26 @@ export default function AgentDetail() {
       setLoading(false);
     }
   };
+
+  const loadNotifications = async (agentId: string) => {
+    setNotifLoading(true);
+    try {
+      const token = localStorage.getItem('claw_token');
+      const r = await fetch(`${(import.meta as any).env?.VITE_API_URL || 'http://localhost:3001'}/api/agents/${agentId}/notifications?limit=100`, {
+        headers: { Authorization: 'Bearer ' + token },
+      });
+      if (r.ok) {
+        const d = await r.json();
+        setNotifications(d.notifications || []);
+        setNotifUnread(d.unread_count || 0);
+      }
+    } catch {}
+    finally { setNotifLoading(false); }
+  };
+
+  useEffect(() => {
+    if (tab === 'notifications' && id) loadNotifications(id);
+  }, [tab, id]);
 
   if (loading) return (
     <div className="flex items-center justify-center h-40 gap-3">
@@ -274,13 +297,13 @@ export default function AgentDetail() {
       {/* Tabs */}
       <div>
         <div className="flex gap-1 mb-3">
-          {(['tasks', 'projects'] as const).map(t => (
+          {(['tasks', 'projects', 'notifications'] as const).map(t => (
             <button key={t} onClick={() => setTab(t)}
               style={{ ...mono, fontSize: 10, letterSpacing: '0.08em', padding: '5px 14px', borderRadius: 2, cursor: 'pointer', border: 'none', textTransform: 'uppercase',
                 background: tab === t ? 'var(--amber)' : 'var(--ink-3)',
                 color:      tab === t ? '#000'         : 'var(--text-lo)',
               }}>
-              {t === 'tasks' ? `TASKS (${ts.total})` : `PROJECTS (${agent.projects.length})`}
+              {t === 'tasks' ? `TASKS (${ts.total})` : t === 'projects' ? `PROJECTS (${agent.projects.length})` : `FEED${notifUnread > 0 ? ` (${notifUnread})` : ''}`}
             </button>
           ))}
         </div>
@@ -322,6 +345,47 @@ export default function AgentDetail() {
                   })}
                 </tbody>
               </table>
+            )}
+          </div>
+        )}
+
+        {tab === 'notifications' && (
+          <div className="ops-panel" style={{ padding: 0, overflow: 'hidden' }}>
+            {notifLoading ? (
+              <div style={{ padding: 24, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Loader2 size={12} className="animate-spin" style={{ color: 'var(--amber)' }} />
+                <span style={{ ...mono, fontSize: 10, color: 'var(--text-lo)' }}>Loading feed...</span>
+              </div>
+            ) : notifications.length === 0 ? (
+              <div style={{ ...mono, fontSize: 11, color: 'var(--text-lo)', padding: '32px', textAlign: 'center' }}>— no notifications yet —</div>
+            ) : (
+              notifications.map((n: any, i: number) => {
+                const typeColors: Record<string, string> = {
+                  task_assigned: '#60a5fa', task_completed: '#10b981', task_rejected: '#ef4444',
+                  task_failed: '#ef4444', project_assigned: 'var(--amber)', agent_message: 'var(--cyan)',
+                };
+                const c = typeColors[n.type] || '#64748b';
+                return (
+                  <div key={n.id} style={{
+                    padding: '10px 16px', borderBottom: i < notifications.length - 1 ? '1px solid var(--ink-3)' : 'none',
+                    borderLeft: n.is_read ? '2px solid transparent' : `2px solid ${c}`,
+                    background: n.is_read ? 'transparent' : 'rgba(255,255,255,0.01)',
+                    display: 'flex', gap: 12, alignItems: 'flex-start',
+                  }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                        <span style={{ ...mono, fontSize: 8, color: c, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{n.type}</span>
+                        {!n.is_read && <span style={{ width: 5, height: 5, borderRadius: '50%', background: c, display: 'inline-block' }} />}
+                      </div>
+                      <div style={{ ...mono, fontSize: 11, color: 'var(--text-hi)' }}>{n.title}</div>
+                      {n.content && <div style={{ ...mono, fontSize: 10, color: 'var(--text-mid)', marginTop: 2 }}>{n.content}</div>}
+                    </div>
+                    <div style={{ ...mono, fontSize: 9, color: 'var(--text-lo)', flexShrink: 0 }}>
+                      {new Date(n.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                  </div>
+                );
+              })
             )}
           </div>
         )}

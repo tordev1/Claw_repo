@@ -1166,22 +1166,32 @@ async function executeTaskRoute(request, reply) {
     // Sync agent status — set to idle if no other running tasks
     syncAgentStatus(db, agent.id);
 
-    // Track token cost in cost_records
+    // Track token/cost usage in cost_records
     if (!execResult.skipped && execResult.tokens && execResult.cost) {
       try {
+        const provider = execResult.provider || 'unknown';
+        const pricing = execResult.cost.pricing || { prompt: 0, completion: 0 };
+        const metadata = {
+          task_id: id,
+          task_title: task.title,
+          agent_id: agent.id,
+          cost_mode: execResult.cost_mode || 'estimated',
+          source: 'task_execute'
+        };
+
         db.prepare(`
           INSERT INTO cost_records (id, project_id, user_id, model, provider,
             prompt_tokens, completion_tokens, total_tokens, cost_usd,
             cost_per_1k_prompt, cost_per_1k_completion, request_id, is_cached, metadata, recorded_at)
-          VALUES (?, ?, ?, ?, 'openrouter', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
         `).run(
-          generateId(), task.project_id, agent.id, execResult.model,
-          execResult.tokens.prompt, execResult.tokens.completion, execResult.tokens.total,
-          execResult.cost.total_cost,
-          execResult.cost.pricing.prompt / 1000,
-          execResult.cost.pricing.completion / 1000,
+          generateId(), task.project_id, null, execResult.model || 'unknown', provider,
+          execResult.tokens.prompt || 0, execResult.tokens.completion || 0, execResult.tokens.total || 0,
+          execResult.cost.total_cost || 0,
+          (pricing.prompt || 0) / 1000,
+          (pricing.completion || 0) / 1000,
           generateId(),
-          JSON.stringify({ task_id: id, task_title: task.title, agent_id: agent.id }),
+          JSON.stringify(metadata),
           now
         );
       } catch (e) { console.error('[execute] cost tracking error:', e.message); }
@@ -4141,49 +4151,6 @@ async function agentHeartbeatRoute(request, reply) {
   return { ok: true, timestamp: now };
 }
 
-// GET /api/agents/:id/notifications - Get agent notifications
-async function getAgentNotificationsRoute(request, reply) {
-  const db = getDb();
-  const { id } = request.params;
-  const user = request.user;
-  const { limit = 20, unread_only = false } = request.query;
-
-  const agent = db.prepare('SELECT id FROM manager_agents WHERE id = ?').get(id);
-  if (!agent) {
-    reply.code(404);
-    return { error: 'Agent not found' };
-  }
-
-  // Only admins or the agent itself can view notifications
-  const isAdmin = user?.role === 'admin';
-  const isSelf = user?.id === id;
-
-  if (!isAdmin && !isSelf) {
-    reply.code(403);
-    return { error: 'Not authorized' };
-  }
-
-  let query = 'SELECT * FROM agent_notifications WHERE agent_id = ?';
-  const params = [id];
-
-  if (unread_only === 'true') {
-    query += ' AND is_read = FALSE';
-  }
-
-  query += ' ORDER BY created_at DESC LIMIT ?';
-  params.push(parseInt(limit));
-
-  const notifications = db.prepare(query).all(...params);
-
-  return {
-    notifications: notifications.map(n => ({
-      ...n,
-      data: JSON.parse(n.data || '{}')
-    })),
-    count: notifications.length
-  };
-}
-
 // POST /api/agents/:id/notifications/:notificationId/read - Mark agent notification as read
 async function markAgentNotificationReadRoute(request, reply) {
   const db = getDb();
@@ -4539,7 +4506,7 @@ async function getTokenDashboardRoute(request, reply) {
 async function getProviderTokensRoute(request, reply) {
   try {
     const { provider } = request.params;
-    const validProviders = ['openai', 'anthropic', 'claude'];
+    const validProviders = ['openai', 'anthropic', 'claude', 'ollama'];
     if (!validProviders.includes(provider)) {
       reply.code(400);
       return { error: 'Unknown provider. Use: openai or anthropic/claude' };
@@ -5342,34 +5309,80 @@ async function markAllNotificationsReadRoute(request, reply) {
 
 // GET /api/agents/:id/notifications - Get agent notifications
 async function getAgentNotificationsRoute(request, reply) {
+  const db = getDb();
   const { id } = request.params;
   const user = request.user;
+  const { limit = 50, unread_only, type } = request.query;
 
-  // Only admins or the agent itself
+  const agent = db.prepare('SELECT id, name FROM manager_agents WHERE id = ?').get(id);
+  if (!agent) { reply.code(404); return { error: 'Agent not found' }; }
+
   const isAdmin = user?.role === 'admin';
   const isSelf = user?.id === id;
+  if (!isAdmin && !isSelf) { reply.code(403); return { error: 'Not authorized' }; }
 
-  if (!isAdmin && !isSelf) {
-    reply.code(403);
-    return { error: 'Not authorized' };
-  }
+  let q = 'SELECT * FROM agent_notifications WHERE agent_id = ?';
+  const params = [id];
+  if (unread_only === 'true') { q += ' AND is_read = 0'; }
+  if (type) { q += ' AND type = ?'; params.push(type); }
+  q += ' ORDER BY created_at DESC LIMIT ?';
+  params.push(parseInt(limit));
 
-  try {
-    const notifications = await getAgentNotifications(id);
-    const unreadCount = await getAgentUnreadCount(id);
-    return {
-      notifications,
-      unread_count: unreadCount
-    };
-  } catch (err) {
-    reply.code(500);
-    return { error: err.message };
-  }
+  const rows = db.prepare(q).all(...params);
+  const unread = db.prepare('SELECT COUNT(*) as c FROM agent_notifications WHERE agent_id = ? AND is_read = 0').get(id);
+
+  return {
+    agent: { id: agent.id, name: agent.name },
+    notifications: rows.map(n => ({ ...n, data: JSON.parse(n.data || '{}') })),
+    unread_count: unread.c,
+    total: rows.length
+  };
+}
+
+// GET /api/notifications/agents/feed - Aggregated all-agent notification feed (admin only)
+async function getAgentsFeedRoute(request, reply) {
+  const db = getDb();
+  const user = request.user;
+  if (!user || user.role !== 'admin') { reply.code(403); return { error: 'Admin access required' }; }
+
+  const { limit = 100, agent_id, type, unread_only } = request.query;
+
+  let q = `
+    SELECT an.*, ma.name as agent_name, ma.agent_type, ma.handle as agent_handle
+    FROM agent_notifications an
+    LEFT JOIN manager_agents ma ON an.agent_id = ma.id
+    WHERE 1=1
+  `;
+  const params = [];
+  if (agent_id) { q += ' AND an.agent_id = ?'; params.push(agent_id); }
+  if (type) { q += ' AND an.type = ?'; params.push(type); }
+  if (unread_only === 'true') { q += ' AND an.is_read = 0'; }
+  q += ' ORDER BY an.created_at DESC LIMIT ?';
+  params.push(parseInt(limit));
+
+  const rows = db.prepare(q).all(...params);
+
+  // Unread count per agent
+  const agentCounts = db.prepare(`
+    SELECT agent_id, COUNT(*) as unread, ma.name as agent_name
+    FROM agent_notifications an
+    LEFT JOIN manager_agents ma ON an.agent_id = ma.id
+    WHERE an.is_read = 0
+    GROUP BY an.agent_id
+  `).all();
+
+  return {
+    notifications: rows.map(n => ({ ...n, data: JSON.parse(n.data || '{}') })),
+    total: rows.length,
+    unread_by_agent: agentCounts
+  };
 }
 
 module.exports.linkMachineAgentRoute = linkMachineAgentRoute;
 module.exports.unlinkMachineAgentRoute = unlinkMachineAgentRoute;
-// Notifications - exported in module.exports above
+module.exports.getAgentNotificationsRoute = getAgentNotificationsRoute;
+module.exports.markAgentNotificationReadRoute = markAgentNotificationReadRoute;
+module.exports.getAgentsFeedRoute = getAgentsFeedRoute;
 
 // ============================================================================
 // PROFILE & PREFERENCES ROUTES

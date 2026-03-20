@@ -31,6 +31,7 @@ const Docs = lazy(() => import('./pages/Docs'));
 const Fleet = lazy(() => import('./pages/Fleet'));
 const Presets = lazy(() => import('./pages/Presets'));
 const SystemHealth = lazy(() => import('./pages/SystemHealth'));
+const LiveReport = lazy(() => import('./pages/LiveReport'));
 
 function PageLoader() {
   return (
@@ -243,6 +244,7 @@ function App() {
             <Route path="/fleet" element={<Fleet />} />
             <Route path="/presets" element={<Presets />} />
             <Route path="/health" element={<SystemHealth />} />
+            <Route path="/live-report" element={<LiveReport />} />
             <Route
               path="/rnd"
               element={
