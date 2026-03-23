@@ -11,6 +11,12 @@
 
 'use strict';
 
+// Load env vars from scripts/.env if present
+const path  = require('path');
+try { require('dotenv').config({ path: path.join(__dirname, '.env') }); } catch (_) {}
+// Also try repo-root .env as fallback
+try { require('dotenv').config({ path: path.join(__dirname, '..', 'api-server', '.env') }); } catch (_) {}
+
 const http  = require('http');
 const https = require('https');
 const fs    = require('fs');
@@ -66,10 +72,15 @@ acquireLock();
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const API_BASE           = 'http://localhost:3001';
-const WS_BASE            = 'ws://localhost:3001';
-const TG_TOKEN           = '8783471778:AAHWJMsiqyn1qqgP0ieeyFOdcWT3eoM33-o';
-const TG_CHAT_ID         = '8056454171';
+const API_BASE           = process.env.API_BASE   || 'http://localhost:3001';
+const WS_BASE            = process.env.WS_BASE    || 'ws://localhost:3001';
+const TG_TOKEN           = process.env.TG_TOKEN;
+const TG_CHAT_ID         = process.env.TG_CHAT_ID;
+
+if (!TG_TOKEN || !TG_CHAT_ID) {
+  console.error('[notifier] Missing TG_TOKEN or TG_CHAT_ID env vars. Set them in scripts/.env or environment.');
+  process.exit(1);
+}
 const RECONNECT_DELAY_MS = 5000;
 const MAX_RECONNECT_MS   = 60000;
 const PING_INTERVAL_MS   = 20000;
