@@ -11,16 +11,15 @@
 
 'use strict';
 
-// Load env vars from scripts/.env if present
-const path  = require('path');
-try { require('dotenv').config({ path: path.join(__dirname, '.env') }); } catch (_) {}
-// Also try repo-root .env as fallback
-try { require('dotenv').config({ path: path.join(__dirname, '..', 'api-server', '.env') }); } catch (_) {}
-
 const http  = require('http');
 const https = require('https');
 const fs    = require('fs');
 const path  = require('path');
+
+// Load env vars from scripts/.env if present, then api-server/.env as fallback
+const dotenvPath = path.join(__dirname, '..', 'api-server', 'node_modules', 'dotenv');
+try { require(dotenvPath).config({ path: path.join(__dirname, '.env') }); } catch (_) {}
+try { require(dotenvPath).config({ path: path.join(__dirname, '..', 'api-server', '.env') }); } catch (_) {}
 const { setTimeout: sleep } = require('timers/promises');
 const WebSocket = require('../api-server/node_modules/ws');
 
