@@ -191,7 +191,7 @@ function AgentCard({ agent, dragging = false, inProject = false, collecting = fa
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: dept ? 12 : 10,
           }}>
-            {dept ? dept.icon : pmMode ? pmMode.icon : <Bot size={10} style={{ color: typeColor }} />}
+            {dept ? dept.icon : pmMode ? pmMode.icon : agent.agent_type === 'pm' ? <Cpu size={10} style={{ color: typeColor }} /> : agent.agent_type === 'rnd' ? <Radio size={10} style={{ color: typeColor }} /> : <Bot size={10} style={{ color: typeColor }} />}
           </div>
           <div>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: inProject ? 10 : 11, fontWeight: 700, color: 'var(--text-hi)', lineHeight: 1 }}>
@@ -221,7 +221,11 @@ function AgentCard({ agent, dragging = false, inProject = false, collecting = fa
         </div>
       ) : (
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: 4 }}>
-          {normalizeAgentStatus(agent) === 'registered' ? 'REGISTERED ⠿ ready to assign' : 'FREE ⠿ drag to assign'}
+          {inProject
+            ? `NOT FREE ⠿ ${agent.agent_type?.toUpperCase() || 'WORKER'}`
+            : normalizeAgentStatus(agent) === 'registered'
+              ? 'REGISTERED ⠿ ready to assign'
+              : 'FREE ⠿ drag to assign'}
         </div>
       )}
 
@@ -438,6 +442,7 @@ export default function HQ() {
   const [newlyJoined, setNewlyJoined] = useState<Set<string>>(new Set());
   const [recruitingProject, setRecruitingProject] = useState<string | null>(null);
   const collectTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const [notifierStats, setNotifierStats] = useState<{ uptimeSec: number; sent: number; events: Record<string, number> } | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -473,6 +478,19 @@ export default function HQ() {
   // Load presets for dynamic department/mode/division info
   useEffect(() => {
     presetsApi.list().then(setPresets).catch(() => { /* presets are optional */ });
+  }, []);
+
+  // Poll notifier stats every 30s
+  useEffect(() => {
+    const fetchStats = () => {
+      fetch('http://127.0.0.1:13099/stats')
+        .then(r => r.json())
+        .then(setNotifierStats)
+        .catch(() => setNotifierStats(null));
+    };
+    fetchStats();
+    const t = setInterval(fetchStats, 30000);
+    return () => clearInterval(t);
   }, []);
 
   // WS: live activity feed + agent refresh
@@ -710,6 +728,77 @@ export default function HQ() {
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 700, color, textShadow: `0 0 16px ${color}40` }}>{value}</div>
             </div>
           ))}
+        </div>
+
+        {/* ── HEARTBEAT PANEL ────────────────────────────────────────────── */}
+        <div className="neon-card" style={{ padding: '12px 16px' }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--cyan)', letterSpacing: '0.15em', marginBottom: 10 }}>
+            // AGENT HEARTBEAT
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {agents.map(agent => {
+              const s         = normalizeAgentStatus(agent);
+              const typeColor = getTypeColor(agent.agent_type);
+              const dotClass  = getStatusDot(s);
+              const lastSeen  = agent.last_heartbeat ? fmtTime(agent.last_heartbeat) : '—';
+              return (
+                <div key={agent.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '6px 10px', borderRadius: 4,
+                  background: 'var(--ink-2)', border: `1px solid ${typeColor}20`,
+                  borderLeft: `2px solid ${typeColor}`,
+                  minWidth: 160,
+                }}>
+                  <span className={dotClass} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--text-hi)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {agent.name}
+                    </div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--text-lo)', marginTop: 1 }}>
+                      {s.toUpperCase()} · last seen {lastSeen}
+                    </div>
+                  </div>
+                  <span style={{
+                    fontFamily: 'var(--font-mono)', fontSize: 7, padding: '1px 5px',
+                    borderRadius: 2, background: `${typeColor}10`, border: `1px solid ${typeColor}20`,
+                    color: typeColor, letterSpacing: '0.08em', textTransform: 'uppercase', flexShrink: 0,
+                  }}>{agent.agent_type}</span>
+                </div>
+              );
+            })}
+            {agents.length === 0 && (
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-lo)' }}>No agents registered</span>
+            )}
+          </div>
+        </div>
+
+        {/* ── NOTIFIER STATUS ────────────────────────────────────────────── */}
+        <div className="neon-card" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--cyan)', letterSpacing: '0.15em', flexShrink: 0 }}>
+            // TG NOTIFIER
+          </div>
+          {notifierStats ? (
+            <>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--green)' }}>
+                ● online
+              </span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-lo)' }}>
+                uptime {Math.floor(notifierStats.uptimeSec / 3600)}h {Math.floor((notifierStats.uptimeSec % 3600) / 60)}m
+              </span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-lo)' }}>
+                sent: <span style={{ color: 'var(--text-hi)' }}>{notifierStats.sent}</span>
+              </span>
+              {Object.entries(notifierStats.events).filter(([, v]) => v > 0).map(([k, v]) => (
+                <span key={k} style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--text-lo)', background: 'var(--ink-3)', padding: '2px 6px', borderRadius: 2 }}>
+                  {k.replace('task:', '').replace('project:', 'proj:').replace('agent:assigned_to_project', 'agent→proj')}: {v}
+                </span>
+              ))}
+            </>
+          ) : (
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-lo)' }}>
+              ○ offline — run <code>node scripts/notifier.js</code>
+            </span>
+          )}
         </div>
 
         {/* ── FREE POOL ──────────────────────────────────────────────────── */}

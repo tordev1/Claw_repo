@@ -93,11 +93,14 @@ function prompt(question, secret = false) {
 }
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
-function wsConnect(agentId, userToken, onMsg) {
+const WS_MAX_RECONNECT_DELAY = 60000;
+
+function wsConnect(agentId, userToken, onMsg, reconnectDelay = 5000) {
     const u = new URL(`${BASE}/ws?token=${encodeURIComponent(userToken)}`);
     const lib = u.protocol === 'https:' ? https : http;
     const port = parseInt(u.port) || (u.protocol === 'https:' ? 443 : 80);
     const key = Buffer.from(Array.from({length: 16}, () => Math.floor(Math.random() * 256))).toString('base64');
+    let didConnect = false;
 
     const httpReq = lib.request({
         hostname: u.hostname,
@@ -113,6 +116,7 @@ function wsConnect(agentId, userToken, onMsg) {
     httpReq.end();
 
     httpReq.on('upgrade', (res, sock, head) => {
+        didConnect = true;
         log('WS', 'Connected ✓', C.G);
         let buf = head && head.length ? head : Buffer.alloc(0);
 
@@ -136,8 +140,10 @@ function wsConnect(agentId, userToken, onMsg) {
 
         sock.on('close', () => {
             clearInterval(keepalive);
-            log('WS', 'Disconnected — reconnecting in 5s...', C.Y);
-            setTimeout(() => wsConnect(agentId, userToken, onMsg), 5000);
+            // Reset delay to base if we had a successful connection, otherwise back off
+            const nextDelay = didConnect ? 5000 : Math.min(reconnectDelay * 2, WS_MAX_RECONNECT_DELAY);
+            log('WS', `Disconnected — reconnecting in ${nextDelay / 1000}s...`, C.Y);
+            setTimeout(() => wsConnect(agentId, userToken, onMsg, nextDelay), nextDelay);
         });
     });
 
@@ -148,12 +154,14 @@ function wsConnect(agentId, userToken, onMsg) {
             log('WS', `Upgrade rejected: HTTP ${res.statusCode} — ${body.substring(0, 150)}`, C.R);
         });
         res.resume();
-        setTimeout(() => wsConnect(agentId, userToken, onMsg), 5000);
+        const nextDelay = Math.min(reconnectDelay * 2, WS_MAX_RECONNECT_DELAY);
+        setTimeout(() => wsConnect(agentId, userToken, onMsg, nextDelay), reconnectDelay);
     });
 
     httpReq.on('error', e => {
-        log('WS', e.message, C.R);
-        setTimeout(() => wsConnect(agentId, userToken, onMsg), 5000);
+        log('WS', `${e.message} — retrying in ${reconnectDelay / 1000}s`, C.R);
+        const nextDelay = Math.min(reconnectDelay * 2, WS_MAX_RECONNECT_DELAY);
+        setTimeout(() => wsConnect(agentId, userToken, onMsg, nextDelay), reconnectDelay);
     });
 }
 
@@ -383,32 +391,59 @@ async function main() {
     const regRes = await req('POST', '/api/agents/register', regBody);
 
     let agentId, userToken;
+    let alreadyApproved = false;
+
     if (regRes.status === 201 || regRes.status === 200) {
         agentId = regRes.body.id || regRes.body.agent?.id;
         userToken = regRes.body.token;
         log('INIT', `✓ Registered. ID: ${agentId}`, C.G);
     } else if (regRes.status === 409) {
-        log('INIT', `Handle @${AGENT_HANDLE} already exists — run node reset-db.js first.`, C.R);
-        process.exit(1);
+        log('INIT', `Handle @${AGENT_HANDLE} already exists — resuming existing session...`, C.Y);
+        // Authenticate as admin (agent sessions are admin sessions internally)
+        const loginRes = await req('POST', '/api/auth/login', { login: 'Scorpion', password: 'Scorpion123' });
+        if (loginRes.status !== 200) {
+            log('INIT', `Admin login failed (${loginRes.status}): ${JSON.stringify(loginRes.body)}`, C.R);
+            process.exit(1);
+        }
+        userToken = loginRes.body.token || loginRes.body.access_token ||
+            (loginRes.body.session && loginRes.body.session.token);
+        if (!userToken) {
+            log('INIT', `No token in login response: ${JSON.stringify(loginRes.body)}`, C.R);
+            process.exit(1);
+        }
+        // Look up existing agent by handle
+        const listRes = await req('GET', '/api/agents', null, userToken);
+        const agentList = listRes.body?.agents || (Array.isArray(listRes.body) ? listRes.body : []);
+        const handle = AGENT_HANDLE.startsWith('@') ? AGENT_HANDLE : `@${AGENT_HANDLE}`;
+        const existing = agentList.find(a => a.handle === handle || a.handle === AGENT_HANDLE);
+        if (!existing) {
+            log('INIT', `Could not find agent with handle ${handle} in list`, C.R);
+            process.exit(1);
+        }
+        agentId = existing.id;
+        alreadyApproved = existing.is_approved === true || existing.is_approved === 1;
+        log('INIT', `✓ Resumed. ID: ${agentId} (approved=${alreadyApproved})`, C.G);
     } else {
         log('INIT', `Registration failed (${regRes.status}): ${JSON.stringify(regRes.body)}`, C.R);
         process.exit(1);
     }
 
-    // ── Step 2: Wait for approval ─────────────────────────────────────────────
-    log('INIT', ``, C.X);
-    log('INIT', `${C.B}Waiting for admin approval...${C.X}`, C.Y);
-    log('INIT', `Ask admin to approve @${AGENT_HANDLE} at the /admin panel`, C.X);
+    // ── Step 2: Wait for approval (skip if already approved) ─────────────────
+    if (!alreadyApproved) {
+        log('INIT', ``, C.X);
+        log('INIT', `${C.B}Waiting for admin approval...${C.X}`, C.Y);
+        log('INIT', `Ask admin to approve @${AGENT_HANDLE} at the /admin panel`, C.X);
 
-    let approved = false;
-    while (!approved) {
-        await sleep(3000);
-        const check = await req('GET', `/api/agents/${agentId}`, null, userToken);
-        const a = check.body?.agent || check.body;
-        approved = a?.is_approved === true || a?.is_approved === 1;
-        process.stdout.write('.');
+        let approved = false;
+        while (!approved) {
+            await sleep(3000);
+            const check = await req('GET', `/api/agents/${agentId}`, null, userToken);
+            const a = check.body?.agent || check.body;
+            approved = a?.is_approved === true || a?.is_approved === 1;
+            process.stdout.write('.');
+        }
+        console.log('');
     }
-    console.log('');
     log('INIT', '✅ Agent approved!', C.G);
 
     // ── Step 3: Go online ──────────────────────────────────────────────────────

@@ -65,6 +65,19 @@ async function buildServer() {
   // Initialize database
   await initDatabase();
 
+  // Recover tasks stuck in 'running' from a previous server crash/restart.
+  // Any task still 'running' at boot was abandoned mid-execution.
+  {
+    const db = getDb();
+    const now = new Date().toISOString();
+    const { changes } = db.prepare(
+      `UPDATE tasks SET status='failed', result='AI execution failed: server restarted while task was in-flight', updated_at=? WHERE status='running'`
+    ).run(now);
+    if (changes > 0) {
+      fastify.log.warn(`[startup] Recovered ${changes} task(s) stuck in 'running' — marked failed`);
+    }
+  }
+
   // Sync filesystem presets to database
   const { syncPresetsToDb } = require('./presets');
   const synced = syncPresetsToDb();
@@ -806,13 +819,46 @@ async function start() {
         `).all(staleThreshold);
 
         for (const agent of staleAgents) {
+          const now = new Date().toISOString();
           db.prepare(`UPDATE manager_agents SET status = 'offline', updated_at = ? WHERE id = ?`)
-            .run(new Date().toISOString(), agent.id);
+            .run(now, agent.id);
           wsManager.broadcast('agent:status_changed', { agent_id: agent.id, agent_name: agent.name, status: 'offline' });
           console.log(`[Heartbeat] Agent ${agent.name} marked offline (no heartbeat)`);
+
+          // ── Task retry: reset any tasks this agent was running back to pending ──
+          const { changes: taskChanges } = db.prepare(
+            `UPDATE tasks SET status = 'pending', agent_id = NULL, updated_at = ? WHERE agent_id = ? AND status = 'running'`
+          ).run(now, agent.id);
+          if (taskChanges > 0) {
+            console.log(`[Heartbeat] Reset ${taskChanges} running task(s) from ${agent.name} → pending for re-assignment`);
+            // Trigger auto-assign for each reset task
+            try {
+              const { autoAssignTask } = require('./orchestration-engine');
+              const resetTasks = db.prepare(`SELECT id FROM tasks WHERE agent_id IS NULL AND status = 'pending'`).all();
+              for (const t of resetTasks) {
+                Promise.resolve(autoAssignTask(t.id, { assignedBy: 'system-retry' }))
+                  .catch(e => console.error('[Heartbeat] Auto-reassign failed:', e.message));
+              }
+            } catch (e) {
+              console.error('[Heartbeat] Task retry hook error:', e.message);
+            }
+          }
         }
       } catch (e) {
         console.error('[Heartbeat cron error]', e.message);
+      }
+    }, 60 * 1000);
+
+    // ── Typing indicator cleanup (remove expired rows every 60s) ───────────────
+    setInterval(() => {
+      try {
+        const db = getDb();
+        const { changes } = db.prepare(
+          `DELETE FROM typing_indicators WHERE expires_at < datetime('now')`
+        ).run();
+        if (changes > 0) fastify.log.debug(`[cleanup] Removed ${changes} expired typing indicator(s)`);
+      } catch (e) {
+        fastify.log.warn(`[cleanup] Typing indicator cleanup error: ${e.message}`);
       }
     }, 60 * 1000);
     // ──────────────────────────────────────────────────────────────────────────

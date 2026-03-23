@@ -20,9 +20,12 @@ mkdir -p "$LOG_DIR"
 API_LOG="$LOG_DIR/api-server.log"
 WEB_LOG="$LOG_DIR/web-hq.log"
 AGENT_LOG="$LOG_DIR/agent.log"
+NOTIFIER_LOG="$LOG_DIR/notifier.log"
 API_PID_FILE="$LOG_DIR/api-server.pid"
 WEB_PID_FILE="$LOG_DIR/web-hq.pid"
 AGENT_PID_FILE="$LOG_DIR/agent.pid"
+NOTIFIER_PID_FILE="$LOG_DIR/notifier.pid"
+AGENTS_DIR="$LOG_DIR/agents"
 
 C_G='\033[0;32m'
 C_Y='\033[0;33m'
@@ -111,31 +114,89 @@ start_web() {
   fi
 }
 
-# ── Start Agent ───────────────────────────────────────────────────────────────
+# ── Start a single named agent ────────────────────────────────────────────────
+start_one_agent() {
+  local name="$1"
+  local handle="$2"
+  local type="${3:-worker}"
+  mkdir -p "$AGENTS_DIR"
+  local pid_file="$AGENTS_DIR/${handle}.pid"
+  local log_file="$AGENTS_DIR/${handle}.log"
+
+  if [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+    warn "Agent @$handle already running (PID $(cat "$pid_file"))"
+    return
+  fi
+  cd "$REPO_ROOT/api-server"
+  node agentCLI.js --name "$name" --handle "$handle" --type "$type" >> "$log_file" 2>&1 &
+  echo $! > "$pid_file"
+  sleep 1
+  if kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+    ok "Agent @$handle started  (PID $(cat "$pid_file"))  log: $log_file"
+  else
+    warn "Agent @$handle failed to start — check $log_file"
+  fi
+}
+
+# ── Start all platform agents ─────────────────────────────────────────────────
+start_agents() {
+  log "Starting platform agents..."
+  start_one_agent "Kotlet PM"         "kotlet_pm"  "pm"
+  start_one_agent "Kotlet Ops Tester" "kotlet_ops" "worker"
+  start_one_agent "TestAgent"         "testagent"  "worker"
+}
+
+# ── Start a single ad-hoc agent (legacy one-shot) ─────────────────────────────
 start_agent() {
   local name="${2:-TestAgent}"
   local handle="${3:-testagent}"
-  if [[ -f "$AGENT_PID_FILE" ]] && kill -0 "$(cat "$AGENT_PID_FILE")" 2>/dev/null; then
-    warn "Agent already running (PID $(cat "$AGENT_PID_FILE"))"
+  start_one_agent "$name" "$handle" "worker"
+}
+
+# ── Start Notifier ────────────────────────────────────────────────────────────
+start_notifier() {
+  if [[ -f "$NOTIFIER_PID_FILE" ]] && kill -0 "$(cat "$NOTIFIER_PID_FILE")" 2>/dev/null; then
+    warn "Notifier already running (PID $(cat "$NOTIFIER_PID_FILE"))"
     return
   fi
-  log "Starting test agent @$handle..."
-  cd "$REPO_ROOT/api-server"
-  node agentCLI.js --name "$name" --handle "$handle" >> "$AGENT_LOG" 2>&1 &
-  echo $! > "$AGENT_PID_FILE"
+  local NOTIFIER_SCRIPT="$REPO_ROOT/scripts/notifier.js"
+  if [[ ! -f "$NOTIFIER_SCRIPT" ]]; then
+    warn "notifier.js not found — skipping Telegram notifications"
+    return
+  fi
+  log "Starting task notifier..."
+  node "$NOTIFIER_SCRIPT" >> "$NOTIFIER_LOG" 2>&1 &
+  echo $! > "$NOTIFIER_PID_FILE"
   sleep 1
-  if kill -0 "$(cat "$AGENT_PID_FILE")" 2>/dev/null; then
-    ok "Agent started  (PID $(cat "$AGENT_PID_FILE"))  — approve at http://localhost:5173/admin"
-    ok "Agent log: $AGENT_LOG"
+  if kill -0 "$(cat "$NOTIFIER_PID_FILE")" 2>/dev/null; then
+    ok "Notifier started  (PID $(cat "$NOTIFIER_PID_FILE"))  — Telegram notifications active"
   else
-    fail "Agent failed to start — check $AGENT_LOG"
+    warn "Notifier failed to start — check $NOTIFIER_LOG"
+  fi
+}
+
+# ── Respawn Claude ACP ────────────────────────────────────────────────────────
+respawn_claude() {
+  # On Git Bash, $HOME may be /home/user — use USERPROFILE (Windows path) instead
+  local WIN_HOME
+  WIN_HOME="$(cmd //c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r')"
+  local RESPAWN_SCRIPT="${WIN_HOME}/.openclaw/workspace/scripts/respawn-claude.js"
+  if [[ ! -f "$RESPAWN_SCRIPT" ]]; then
+    warn "respawn-claude.js not found at $RESPAWN_SCRIPT — skipping Claude ACP setup"
+    return
+  fi
+  log "Setting up Claude ACP session for Telegram..."
+  if node "$RESPAWN_SCRIPT"; then
+    ok "Claude ACP session ready"
+  else
+    warn "Claude ACP session setup failed — Telegram will use fallback agent"
   fi
 }
 
 # ── Stop ──────────────────────────────────────────────────────────────────────
 stop_all() {
   log "Stopping services..."
-  for pf in "$API_PID_FILE" "$WEB_PID_FILE" "$AGENT_PID_FILE"; do
+  for pf in "$API_PID_FILE" "$WEB_PID_FILE" "$AGENT_PID_FILE" "$NOTIFIER_PID_FILE"; do
     if [[ -f "$pf" ]]; then
       local pid
       pid=$(cat "$pf")
@@ -145,6 +206,18 @@ stop_all() {
       rm -f "$pf"
     fi
   done
+  # Stop all named agents
+  if [[ -d "$AGENTS_DIR" ]]; then
+    for pf in "$AGENTS_DIR"/*.pid; do
+      [[ -f "$pf" ]] || continue
+      local pid
+      pid=$(cat "$pf")
+      if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" && ok "Stopped agent PID $pid"
+      fi
+      rm -f "$pf"
+    done
+  fi
 }
 
 # ── Status ────────────────────────────────────────────────────────────────────
@@ -165,18 +238,25 @@ case "$CMD" in
     check_ollama
     start_api
     start_web
+    start_agents
+    start_notifier
+    respawn_claude
     echo ""
     ok "Stack is up. Open http://localhost:5173"
-    ok "API logs: $API_LOG"
-    ok "Web logs: $WEB_LOG"
+    ok "API logs:      $API_LOG"
+    ok "Web logs:      $WEB_LOG"
+    ok "Notifier logs: $NOTIFIER_LOG"
+    ok "Agent logs:    $AGENTS_DIR/"
     ;;
-  api)    start_api   ;;
-  web)    start_web   ;;
-  agent)  start_agent "$@" ;;
-  stop)   stop_all    ;;
-  status) show_status ;;
+  api)      start_api      ;;
+  web)      start_web      ;;
+  agents)   start_agents   ;;
+  agent)    start_agent "$@" ;;
+  notifier) start_notifier ;;
+  stop)     stop_all       ;;
+  status)   show_status    ;;
   *)
-    echo "Usage: bash scripts/start-local.sh [all|api|web|agent|stop|status]"
+    echo "Usage: bash scripts/start-local.sh [all|api|web|agents|agent|notifier|stop|status]"
     exit 1
     ;;
 esac

@@ -91,9 +91,13 @@ class WebSocketManager {
 
         if (shouldSend && connection.readyState === 1) {
           connection.send(message);
+        } else if (shouldSend && connection.readyState > 1) {
+          // Socket is closing/closed — remove it
+          this.unregister(connection);
         }
       } catch (err) {
-        console.error('WebSocket send error:', err);
+        console.error('WebSocket send error:', err.message);
+        this.unregister(connection);
       }
     }
   }

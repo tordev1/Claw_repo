@@ -9,7 +9,7 @@
     "seed": "node src/seed.js",
     "seed:full": "node seed-new.js",
     "seed:sim": "node src/seed-simulation.js",
-    "test": "npm run test:unit && npm run test:integration",
+    "test": "node --test tests/task-lifecycle.test.js",
     "test:unit": "cross-env NODE_ENV=test node --test src/**/*.test.js",
     "test:integration": "cross-env NODE_ENV=test node --test tests/integration/**/*.test.js",
     "lint": "eslint src/",

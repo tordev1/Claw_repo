@@ -437,7 +437,8 @@ async function createTask(request, reply) {
     setImmediate(() => {
       try {
         const { autoAssignTask } = require('./orchestration-engine');
-        autoAssignTask(id, { assignedBy: userId });
+        Promise.resolve(autoAssignTask(id, { assignedBy: userId }))
+          .catch(e => console.error('[Orchestration] Auto-assign failed:', e.message));
       } catch (e) {
         console.error('[Orchestration] Auto-assign hook error:', e.message);
       }
@@ -2875,7 +2876,9 @@ async function registerRoute(request, reply) {
 const formatAgentResponse = (agent) => ({
   ...agent,
   is_approved: Boolean(agent.is_approved),
-  is_active: Boolean(agent.is_active),
+  // manager_agents has no persisted is_active column in the current schema.
+  // Derive activity so approved agents don't get mislabeled as merely registered.
+  is_active: agent.is_active !== undefined ? Boolean(agent.is_active) : Boolean(agent.is_approved),
   // Parse JSON fields
   skills: JSON.parse(agent.skills || '[]'),
   specialties: JSON.parse(agent.specialties || '[]'),
