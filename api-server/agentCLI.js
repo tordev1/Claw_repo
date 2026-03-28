@@ -20,7 +20,7 @@ const BASE = process.env.API_URL || 'http://localhost:3001';
 const WS_BASE = BASE.replace(/^http/, 'ws');
 
 const args = process.argv.slice(2);
-const get = (f, d) => { const i = args.indexOf(f); return i !== -1 ? args[i + 1] : d; };
+const get = (f, d) => { const i = args.indexOf(f); const v = i !== -1 ? args[i + 1] : undefined; return (v !== undefined && !v.startsWith('--')) ? v : d; };
 
 const AGENT_NAME = get('--name', 'TestAgent');
 const AGENT_HANDLE = get('--handle', 'testagent');
