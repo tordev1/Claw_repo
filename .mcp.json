@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "openclaw": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["api-server/mcp-openclaw.js"],
+      "env": {
+        "MCP_API_URL": "http://192.168.1.94:3001",
+        "MCP_LOGIN": "Scorpion",
+        "MCP_PASSWORD": "Scorpion123"
+      }
+    }
+  }
+}
