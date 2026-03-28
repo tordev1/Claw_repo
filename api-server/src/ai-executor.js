@@ -366,8 +366,8 @@ async function executeTask(task, agent, project) {
 
   // Resolve effective provider
   let provider = requestedProvider || envProvider;
-  // If agent has a dedicated ollama_host, always use ollama regardless of auto detection
-  if (agent.ollama_host && provider === 'auto') {
+  // Agent's ollama_host always wins — overrides even explicit AI_PROVIDER env setting
+  if (agent.ollama_host) {
     provider = 'ollama';
   } else if (provider === 'auto') {
     const ocCheck = spawnSync('openclaw', ['--version'], { shell: true, encoding: 'utf8', timeout: 5000 });
@@ -404,7 +404,7 @@ async function executeTask(task, agent, project) {
   // ── Ollama ────────────────────────────────────────────────────────────────
   if (provider === 'ollama') {
     const agentType   = agent.agent_type || 'worker';
-    const ollamaModel = normalizeModel(requestedModelRaw, 'ollama') || OLLAMA_MODELS[agentType] || DEFAULT_OLLAMA_MODEL;
+    const ollamaModel = normalizeModel(requestedModelRaw, 'ollama') || agent.current_model || OLLAMA_MODELS[agentType] || DEFAULT_OLLAMA_MODEL;
     const response    = await callOllama(messages, ollamaModel, agent.ollama_host || null);
     const content     = response.message?.content || '(no output)';
     const promptTokens     = response.prompt_eval_count || 0;
