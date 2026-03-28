@@ -612,4 +612,4 @@ async function main() {
     log('AGENT', `Ctrl+C to disconnect.\n`, C.Y);
 }
 
-main().catch(e => { console.error(`\n${C.R}Fatal:${C.X}`, e.message); process.exit(1); });
+main().catch(e => { console.error(`\n${C.R}Fatal:${C.X}`, e.stack || e.message); process.exit(1); });
