@@ -426,6 +426,10 @@ async function main() {
         agentId = existing.id;
         alreadyApproved = existing.is_approved === true || existing.is_approved === 1;
         log('INIT', `✓ Resumed. ID: ${agentId} (approved=${alreadyApproved})`, C.G);
+        // Patch ollama_host if running with a custom Ollama endpoint
+        if (OLLAMA_BASE !== 'http://localhost:11434') {
+            await req('PATCH', `/api/agents/${agentId}`, { ollama_host: OLLAMA_BASE }, userToken);
+        }
     } else {
         log('INIT', `Registration failed (${regRes.status}): ${JSON.stringify(regRes.body)}`, C.R);
         process.exit(1);
