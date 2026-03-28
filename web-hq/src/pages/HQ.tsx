@@ -519,6 +519,8 @@ export default function HQ() {
     wsClient.on('agent:assigned_to_project', onAssigned);
     wsClient.on('agent:removed',           onRemoved);
     wsClient.on('agent:removed_from_project', onRemoved);
+    wsClient.on('agent:registered',        load);
+    wsClient.on('agent:approved',          load);
 
     return () => {
       wsClient.off('task:started',            onTaskStarted);
@@ -532,6 +534,8 @@ export default function HQ() {
       wsClient.off('agent:assigned_to_project', onAssigned);
       wsClient.off('agent:removed',           onRemoved);
       wsClient.off('agent:removed_from_project', onRemoved);
+      wsClient.off('agent:registered',        load);
+      wsClient.off('agent:approved',          load);
     };
   }, [load, pushActivity]);
 

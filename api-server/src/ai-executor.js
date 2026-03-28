@@ -47,11 +47,12 @@ const OLLAMA_COST_PROMPT_PER_1M = parseFloat(process.env.OLLAMA_COST_PROMPT_PER_
 const OLLAMA_COST_COMPLETION_PER_1M = parseFloat(process.env.OLLAMA_COST_COMPLETION_PER_1M || '0');
 
 // ── HTTP call to Ollama (/api/chat, non-streaming) ────────────────────────────
-function callOllama(messages, model) {
+function callOllama(messages, model, agentOllamaHost) {
   return new Promise((resolve, reject) => {
     const timeoutMs = parseInt(process.env.OLLAMA_TIMEOUT_MS || '45000', 10);
+    const baseUrl = agentOllamaHost || OLLAMA_BASE_URL;
     let base;
-    try { base = new URL(OLLAMA_BASE_URL); } catch (e) { return reject(new Error(`Invalid OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}`)); }
+    try { base = new URL(baseUrl); } catch (e) { return reject(new Error(`Invalid ollama host: ${baseUrl}`)); }
 
     const isHttps = base.protocol === 'https:';
     const lib     = isHttps ? https : http;
@@ -401,7 +402,7 @@ async function executeTask(task, agent, project) {
   if (provider === 'ollama') {
     const agentType   = agent.agent_type || 'worker';
     const ollamaModel = normalizeModel(requestedModelRaw, 'ollama') || OLLAMA_MODELS[agentType] || DEFAULT_OLLAMA_MODEL;
-    const response    = await callOllama(messages, ollamaModel);
+    const response    = await callOllama(messages, ollamaModel, agent.ollama_host || null);
     const content     = response.message?.content || '(no output)';
     const promptTokens     = response.prompt_eval_count || 0;
     const completionTokens = response.eval_count        || 0;

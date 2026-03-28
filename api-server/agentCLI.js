@@ -388,6 +388,7 @@ async function main() {
     };
     if (AGENT_MODE) regBody.current_mode = AGENT_MODE;
     if (AGENT_DIVISION) regBody.rnd_division = AGENT_DIVISION;
+    if (OLLAMA_BASE !== 'http://localhost:11434') regBody.ollama_host = OLLAMA_BASE;
     const regRes = await req('POST', '/api/agents/register', regBody);
 
     let agentId, userToken;

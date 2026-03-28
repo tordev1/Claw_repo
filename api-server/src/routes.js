@@ -4008,7 +4008,7 @@ async function getManagerAgentRoute(request, reply) {
 // POST /api/agents/register - Register new manager agent
 async function registerManagerAgentRoute(request, reply) {
   const db = getDb();
-  const { name, handle, email, role = 'developer', skills = [], specialties = [], experience_level = 'mid', agent_type = 'worker', rnd_division, current_mode } = request.body;
+  const { name, handle, email, role = 'developer', skills = [], specialties = [], experience_level = 'mid', agent_type = 'worker', rnd_division, current_mode, ollama_host } = request.body;
 
   if (!name || !handle) {
     reply.code(400);
@@ -4057,9 +4057,9 @@ async function registerManagerAgentRoute(request, reply) {
   const now = new Date().toISOString();
 
   db.prepare(`
-    INSERT INTO manager_agents (id, name, handle, email, role, status, skills, specialties, experience_level, agent_type, rnd_division, current_mode, is_approved, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, 'offline', ?, ?, ?, ?, ?, ?, FALSE, ?, ?)
-  `).run(id, name, normalizedHandle, email || null, role, JSON.stringify(skills), JSON.stringify(specialties), experience_level, agent_type, rnd_division || null, current_mode || null, now, now);
+    INSERT INTO manager_agents (id, name, handle, email, role, status, skills, specialties, experience_level, agent_type, rnd_division, current_mode, ollama_host, is_approved, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, 'offline', ?, ?, ?, ?, ?, ?, ?, FALSE, ?, ?)
+  `).run(id, name, normalizedHandle, email || null, role, JSON.stringify(skills), JSON.stringify(specialties), experience_level, agent_type, rnd_division || null, current_mode || null, ollama_host || null, now, now);
 
   // Auto-create a session token so the agent can operate without admin credentials
   const session = await createSession('user-scorpion-001');
@@ -4290,7 +4290,7 @@ async function patchManagerAgentRoute(request, reply) {
     return { error: 'Not authorized' };
   }
 
-  const allowed = ['agent_type', 'current_mode', 'current_model', 'rnd_division', 'rnd_schedule', 'last_heartbeat', 'project_id'];
+  const allowed = ['agent_type', 'current_mode', 'current_model', 'rnd_division', 'rnd_schedule', 'last_heartbeat', 'project_id', 'ollama_host'];
   const updates = {};
   for (const key of allowed) {
     if (key in request.body) {

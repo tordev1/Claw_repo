@@ -785,6 +785,7 @@ class SQLiteAdapter {
       [`ALTER TABLE manager_agents ADD COLUMN rnd_last_run TEXT;`, 'rnd_last_run'],
       [`ALTER TABLE manager_agents ADD COLUMN last_heartbeat TEXT;`, 'last_heartbeat'],
       [`ALTER TABLE manager_agents ADD COLUMN project_id TEXT;`, 'project_id'],
+      [`ALTER TABLE manager_agents ADD COLUMN ollama_host TEXT;`, 'ollama_host'],
     ];
     for (const [sql] of agentCols) {
       try { this.db.exec(sql); } catch (e) { /* column already exists */ }

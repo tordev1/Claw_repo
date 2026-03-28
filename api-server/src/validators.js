@@ -191,6 +191,7 @@ const registerAgentSchema = z.object({
   current_mode: z.string().max(100).optional().nullable(),
   current_model: z.string().max(100).optional().nullable(),
   rnd_division: z.string().max(100).optional().nullable(),
+  ollama_host: z.string().url().max(255).optional().nullable(),
 });
 
 const updateAgentSchema = z.object({
@@ -202,6 +203,7 @@ const updateAgentSchema = z.object({
   status: z.enum(['online', 'offline', 'working', 'idle']).optional(),
   last_heartbeat: z.string().optional(),
   project_id: z.string().optional().nullable(),
+  ollama_host: z.string().url().max(255).optional().nullable(),
   name: z.string().min(2).max(100).optional(),
   role: z.string().max(50).optional(),
   skills: z.array(z.string().max(100)).max(50).optional(),
