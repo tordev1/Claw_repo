@@ -125,7 +125,8 @@ async function buildServer() {
       }
 
       if (NODE_ENV === 'development' &&
-        (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1'))) {
+        (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1') ||
+         /^https?:\/\/192\.168\.\d+\.\d+(:\d+)?$/.test(origin))) {
         cb(null, true);
         return;
       }
