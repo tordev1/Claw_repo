@@ -366,7 +366,10 @@ async function executeTask(task, agent, project) {
 
   // Resolve effective provider
   let provider = requestedProvider || envProvider;
-  if (provider === 'auto') {
+  // If agent has a dedicated ollama_host, always use ollama regardless of auto detection
+  if (agent.ollama_host && provider === 'auto') {
+    provider = 'ollama';
+  } else if (provider === 'auto') {
     const ocCheck = spawnSync('openclaw', ['--version'], { shell: true, encoding: 'utf8', timeout: 5000 });
     if (ocCheck.status === 0) {
       provider = 'openclaw';
