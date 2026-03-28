@@ -14,6 +14,7 @@ const https = require('https');
 const net = require('net');
 const tls = require('tls');
 const readline = require('readline');
+const os = require('os');
 const { URL } = require('url');
 
 const BASE = process.env.API_URL || 'http://localhost:3001';
@@ -28,6 +29,7 @@ const AGENT_SKILLS = get('--skills', 'general,testing').split(',').map(s => s.tr
 const AGENT_TYPE = get('--type', 'worker'); // pm | worker | rnd
 const AGENT_MODE = get('--mode', null);     // e.g. saas, mobile_app (PM modes)
 const AGENT_DIVISION = get('--division', null); // e.g. ai_ml_research (R&D divisions)
+const MACHINE_IP = process.env.MACHINE_IP || null; // LAN IP of this machine
 
 const C = { G: '\x1b[32m', Y: '\x1b[33m', C: '\x1b[36m', R: '\x1b[31m', B: '\x1b[1m', X: '\x1b[0m', A: '\x1b[33m' };
 const log = (tag, msg, c = C.X) => console.log(`${c}[${new Date().toLocaleTimeString()}] [${tag}]${C.X} ${msg}`);
@@ -428,6 +430,20 @@ async function main() {
         log('INIT', `Registration failed (${regRes.status}): ${JSON.stringify(regRes.body)}`, C.R);
         process.exit(1);
     }
+
+    // ── Step 1b: Register machine & link this agent ───────────────────────────
+    try {
+        const machineRes = await req('POST', '/api/machines/register', {
+            hostname: os.hostname(),
+            ip_address: MACHINE_IP,
+            agent_id: agentId,
+            metadata: { platform: process.platform, arch: process.arch, node: process.version }
+        });
+        if (machineRes.status === 200 || machineRes.status === 201) {
+            const action = machineRes.body.created ? 'Registered' : 'Updated';
+            log('INIT', `✓ Machine ${action}: ${os.hostname()} (${MACHINE_IP || 'no IP'}) → linked to this agent`, C.G);
+        }
+    } catch (e) { log('INIT', `Machine registration skipped: ${e.message}`, C.Y); }
 
     // ── Step 2: Wait for approval (skip if already approved) ─────────────────
     if (!alreadyApproved) {
