@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * notifier.js — Project Claw → Telegram task completion notifier
+ * notifier.js — Project Claw → Telegram notifier + slash command handler
  *
  * Connects to the Project Claw WebSocket server, listens for task/project/agent
  * events, and sends Telegram messages to the admin chat.
+ * Also polls Telegram getUpdates to handle slash commands from the admin.
  *
  * Usage: node scripts/notifier.js
  * Runs as a long-lived background process (managed by start-local.sh).
@@ -86,7 +87,7 @@ const PING_INTERVAL_MS   = 20000;
 
 // ─── HTTP helper ──────────────────────────────────────────────────────────────
 
-function httpRequest(method, url, body) {
+function httpRequest(method, url, body, authToken) {
   return new Promise((resolve, reject) => {
     const parsed  = new URL(url);
     const lib     = parsed.protocol === 'https:' ? https : http;
@@ -98,13 +99,14 @@ function httpRequest(method, url, body) {
       method:   method.toUpperCase(),
       headers:  { 'Content-Type': 'application/json', 'Accept': 'application/json' },
     };
+    if (authToken) options.headers['Authorization'] = `Bearer ${authToken}`;
     if (payload) options.headers['Content-Length'] = Buffer.byteLength(payload);
     const req = lib.request(options, (res) => {
       let data = '';
       res.on('data', (c) => { data += c; });
       res.on('end',  () => resolve({ statusCode: res.statusCode, body: data }));
     });
-    req.setTimeout(10000, () => { req.destroy(new Error('HTTP request timeout')); });
+    req.setTimeout(15000, () => { req.destroy(new Error('HTTP request timeout')); });
     req.on('error', reject);
     if (payload) req.write(payload);
     req.end();
@@ -344,6 +346,159 @@ async function run() {
 
     await sleep(delay);
     delay = Math.min(delay * 2, MAX_RECONNECT_MS);
+  }
+}
+
+// ─── Telegram slash command handler ──────────────────────────────────────────
+
+async function apiCall(method, endpoint, body) {
+  const token = await getToken();
+  const res   = await httpRequest(method, `${API_BASE}${endpoint}`, body, token);
+  const parsed = parseJSON(res.body);
+  if (res.statusCode === 401) {
+    // Token expired — clear and retry once
+    cachedToken = null;
+    const fresh = await getToken();
+    const res2  = await httpRequest(method, `${API_BASE}${endpoint}`, body, fresh);
+    return parseJSON(res2.body);
+  }
+  return parsed;
+}
+
+async function handleSlashCommand(text, chatId) {
+  const parts = text.trim().split(/\s+/);
+  const cmd   = (parts[0] || '').toLowerCase().replace('@tor_dev2bot', '');
+
+  console.log(`[notifier] slash command: ${cmd}`);
+
+  try {
+    if (cmd === '/help') {
+      await sendTelegramTo(chatId, [
+        '🤖 <b>Project Claw commands</b>',
+        '',
+        '/status — system health &amp; agent counts',
+        '/agents — list all agents',
+        '/projects — list all projects',
+        '/project &lt;id&gt; — project details',
+        '/tasks — recent tasks (all projects)',
+        '/tasks &lt;projectId&gt; — tasks in a project',
+        '/newtask &lt;projectId&gt; "title" — create a task',
+        '/execute &lt;taskId&gt; — run a task via AI',
+        '/help — show this list',
+      ].join('\n'));
+
+    } else if (cmd === '/status') {
+      const [health, agentsData] = await Promise.all([
+        apiCall('GET', '/api/health', null).catch(() => ({})),
+        apiCall('GET', '/api/agents', null).catch(() => ({ agents: [] })),
+      ]);
+      const list    = agentsData.agents || agentsData || [];
+      const online  = list.filter(a => a.status === 'online').length;
+      const upSec   = health.uptime ? Math.floor(health.uptime) : 0;
+      const upStr   = upSec > 3600
+        ? `${Math.floor(upSec / 3600)}h ${Math.floor((upSec % 3600) / 60)}m`
+        : `${Math.floor(upSec / 60)}m`;
+      await sendTelegramTo(chatId, [
+        `🟢 <b>Project Claw — Online</b>`,
+        `⏱ Uptime: ${upStr}`,
+        `🤖 Agents: ${online}/${list.length} online`,
+        `🗄 DB: ${health.database || 'connected'}`,
+      ].join('\n'));
+
+    } else if (cmd === '/agents') {
+      const data = await apiCall('GET', '/api/agents', null);
+      const list = data.agents || data || [];
+      if (!list.length) { await sendTelegramTo(chatId, 'No agents registered.'); return; }
+      const lines = list.map(a => {
+        const icon = a.status === 'online' ? '🟢' : '🔴';
+        return `${icon} <b>${escapeHtml(a.name)}</b> (${a.handle}) — ${a.agent_type || 'worker'}`;
+      });
+      await sendTelegramTo(chatId, `<b>Agents (${list.length})</b>\n\n` + lines.join('\n'));
+
+    } else if (cmd === '/projects') {
+      const data = await apiCall('GET', '/api/projects', null);
+      const list = data.projects || data || [];
+      if (!list.length) { await sendTelegramTo(chatId, 'No projects found.'); return; }
+      const lines = list.map(p => {
+        const stats = p.stats || {};
+        return `📁 <b>${escapeHtml(p.name)}</b>\n   ID: <code>${p.id}</code> · ${stats.completedTasks || 0}/${stats.totalTasks || 0} tasks done`;
+      });
+      await sendTelegramTo(chatId, `<b>Projects (${list.length})</b>\n\n` + lines.join('\n\n'));
+
+    } else if (cmd === '/project') {
+      const id = parts[1];
+      if (!id) { await sendTelegramTo(chatId, 'Usage: /project &lt;id&gt;'); return; }
+      const p = await apiCall('GET', `/api/projects/${id}`, null);
+      const stats = p.stats || {};
+      await sendTelegramTo(chatId, [
+        `📁 <b>${escapeHtml(p.name)}</b>`,
+        p.description ? escapeHtml(p.description) : '',
+        `Status: ${p.status}`,
+        `Tasks: ${stats.completedTasks || 0} done / ${stats.totalTasks || 0} total`,
+        `ID: <code>${p.id}</code>`,
+      ].filter(Boolean).join('\n'));
+
+    } else if (cmd === '/tasks') {
+      const projectId = parts[1];
+      const endpoint  = projectId ? `/api/tasks?project_id=${projectId}&limit=10` : '/api/tasks?limit=10';
+      const data      = await apiCall('GET', endpoint, null);
+      const list      = data.tasks || data || [];
+      if (!list.length) { await sendTelegramTo(chatId, 'No tasks found.'); return; }
+      const statusIcon = s => ({ completed: '✅', running: '⚙️', pending: '⏳', failed: '❌', cancelled: '🚫' }[s] || '❓');
+      const lines = list.map(t =>
+        `${statusIcon(t.status)} <b>${escapeHtml(t.title)}</b>\n   ID: <code>${t.id.slice(0, 8)}</code> · ${t.agent_name ? `🤖 ${escapeHtml(t.agent_name)}` : 'unassigned'}`
+      );
+      await sendTelegramTo(chatId, `<b>Tasks</b>\n\n` + lines.join('\n\n'));
+
+    } else if (cmd === '/newtask') {
+      // /newtask <projectId> "title" ["description"]
+      const projectId = parts[1];
+      if (!projectId) { await sendTelegramTo(chatId, 'Usage: /newtask &lt;projectId&gt; "title" ["description"]'); return; }
+      // Extract quoted strings or remaining words
+      const rest    = parts.slice(2).join(' ');
+      const matches = rest.match(/"([^"]+)"/g) || [];
+      const title   = matches[0] ? matches[0].replace(/"/g, '') : rest;
+      const desc    = matches[1] ? matches[1].replace(/"/g, '') : '';
+      if (!title) { await sendTelegramTo(chatId, 'Usage: /newtask &lt;projectId&gt; "title" ["description"]'); return; }
+      const task = await apiCall('POST', '/api/tasks', { project_id: projectId, title, description: desc });
+      await sendTelegramTo(chatId, [
+        `✅ <b>Task created</b>: ${escapeHtml(task.title || title)}`,
+        `ID: <code>${(task.id || '').slice(0, 8)}</code>`,
+        `Status: ${task.status || 'pending'} (auto-assign will pick it up)`,
+      ].join('\n'));
+
+    } else if (cmd === '/execute') {
+      const taskId = parts[1];
+      if (!taskId) { await sendTelegramTo(chatId, 'Usage: /execute &lt;taskId&gt;'); return; }
+      await sendTelegramTo(chatId, `⚙️ Executing task <code>${taskId.slice(0, 8)}</code>...`);
+      const result = await apiCall('POST', `/api/tasks/${taskId}/execute`, {});
+      const snippet = result.result
+        ? (result.result.length > 200 ? result.result.slice(0, 200) + '…' : result.result)
+        : 'Done';
+      await sendTelegramTo(chatId, [
+        `✅ <b>Task executed</b>`,
+        `📝 ${escapeHtml(snippet)}`,
+      ].join('\n'));
+
+    } else {
+      await sendTelegramTo(chatId, `Unknown command: ${escapeHtml(cmd)}\nSend /help for the list.`);
+    }
+  } catch (err) {
+    console.error(`[notifier] Command ${cmd} error:`, err.message);
+    await sendTelegramTo(chatId, `❌ Error: ${escapeHtml(err.message)}`);
+  }
+}
+
+async function sendTelegramTo(chatId, text) {
+  try {
+    const res = await httpRequest('POST', `https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
+      chat_id: chatId, text, parse_mode: 'HTML',
+    });
+    if (res.statusCode !== 200) {
+      console.error(`[notifier] Telegram sendMessage error ${res.statusCode}: ${res.body}`);
+    }
+  } catch (err) {
+    console.error(`[notifier] sendTelegramTo failed: ${err.message}`);
   }
 }
 

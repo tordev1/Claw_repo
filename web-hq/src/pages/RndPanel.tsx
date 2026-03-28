@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { rndApi } from '../services/api';
+import { rndApi, wsClient } from '../services/api';
 import type { RndAgent, RndFinding } from '../services/api';
 import { FlaskConical, Loader2, RefreshCw, Play, Clock, ChevronDown, ChevronUp, CheckCircle } from 'lucide-react';
 
@@ -61,6 +61,16 @@ export default function RndPanel() {
   useEffect(() => {
     fetchAll();
   }, [fetchAll]);
+
+  // Live update when a new finding is posted via WS
+  useEffect(() => {
+    const onFinding = () => {
+      rndApi.getFeed().then(res => setFeed(res.messages || [])).catch(() => {});
+      rndApi.getStatus().then(res => setAgents(res.agents || [])).catch(() => {});
+    };
+    wsClient.on('rnd:findings_posted', onFinding);
+    return () => wsClient.off('rnd:findings_posted', onFinding);
+  }, []);
 
   // Auto-refresh feed every 30 seconds
   useEffect(() => {

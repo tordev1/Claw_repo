@@ -5,7 +5,12 @@
 
 const http  = require('http');
 const https = require('https');
+const { spawnSync } = require('child_process');
 const { loadPresetFile, extractSection } = require('./presets');
+
+// ── OpenClaw config ───────────────────────────────────────────────────────────
+const OPENCLAW_AGENT_ID  = process.env.OPENCLAW_AGENT_ID  || 'main';
+const OPENCLAW_TIMEOUT_S = parseInt(process.env.OPENCLAW_TIMEOUT_S || '120', 10);
 
 // ── Ollama config ─────────────────────────────────────────────────────────────
 const OLLAMA_BASE_URL     = process.env.OLLAMA_BASE_URL     || 'http://127.0.0.1:11434';
@@ -124,6 +129,34 @@ function isOllamaReachable() {
       resolve(false);
     }
   });
+}
+
+// ── OpenClaw subprocess call ──────────────────────────────────────────────────
+function callOpenClaw(taskPrompt) {
+  const result = spawnSync('openclaw', [
+    'agent', '--agent', OPENCLAW_AGENT_ID,
+    '--message', taskPrompt,
+    '--json',
+    '--timeout', String(OPENCLAW_TIMEOUT_S),
+  ], {
+    encoding:  'utf8',
+    timeout:   (OPENCLAW_TIMEOUT_S + 30) * 1000,
+    maxBuffer: 10 * 1024 * 1024,
+    env:       { ...process.env },
+    shell:     true,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`openclaw agent exited ${result.status}: ${(result.stderr || '').trim()}`);
+  const parsed = JSON.parse(result.stdout);
+  if (parsed.status !== 'ok') throw new Error(`openclaw agent status: ${parsed.status}`);
+  const agentMeta = parsed.result?.meta?.agentMeta || {};
+  const text = (parsed.result?.payloads || []).map(p => p.text).filter(Boolean).join('\n\n');
+  return {
+    text,
+    provider: agentMeta.provider || 'openclaw',
+    model:    agentMeta.model    || 'unknown',
+    usage:    agentMeta.usage    || {},
+  };
 }
 
 // ── HTTP call to OpenRouter ───────────────────────────────────────────────────
@@ -273,6 +306,7 @@ function normalizeProvider(value) {
   if (!v) return null;
   if (v === 'claude' || v === 'anthropic' || v === 'openrouter') return 'openrouter';
   if (v === 'ollama') return 'ollama';
+  if (v === 'openclaw') return 'openclaw';
   if (v === 'auto' || v === 'simulation') return v;
   return null;
 }
@@ -332,7 +366,10 @@ async function executeTask(task, agent, project) {
   // Resolve effective provider
   let provider = requestedProvider || envProvider;
   if (provider === 'auto') {
-    if (await isOllamaReachable()) {
+    const ocCheck = spawnSync('openclaw', ['--version'], { shell: true, encoding: 'utf8', timeout: 5000 });
+    if (ocCheck.status === 0) {
+      provider = 'openclaw';
+    } else if (await isOllamaReachable()) {
       provider = 'ollama';
     } else if (apiKey) {
       provider = 'openrouter';
@@ -383,6 +420,41 @@ async function executeTask(task, agent, project) {
       cost_mode: 'estimated',
       result:   content,
       model:    ollamaModel,
+      tokens: {
+        prompt:     promptTokens,
+        completion: completionTokens,
+        total:      promptTokens + completionTokens,
+      },
+      cost,
+    };
+  }
+
+  // ── OpenClaw ──────────────────────────────────────────────────────────────
+  if (provider === 'openclaw') {
+    const taskPrompt = [
+      `Complete this task as an expert ${agent.agent_type || 'worker'} agent:`,
+      ``,
+      `**Project:** ${project?.name || 'Unknown'}`,
+      `**Task:** ${task.title}`,
+      task.description ? `**Details:** ${task.description}` : null,
+      `**Priority:** ${task.priority === 1 ? 'critical' : task.priority === 2 ? 'normal' : 'low'}`,
+      ``,
+      `Deliver concrete, actionable output. Be specific. Use markdown where helpful.`,
+    ].filter(Boolean).join('\n');
+
+    const oc = callOpenClaw(taskPrompt);
+    const promptTokens     = oc.usage.input  || 0;
+    const completionTokens = oc.usage.output || 0;
+    const cost = estimateCost(oc.model, promptTokens, completionTokens,
+      { prompt: 0, completion: 0 });
+
+    return {
+      success:   true,
+      skipped:   false,
+      provider:  'openclaw',
+      cost_mode: 'none',
+      result:    oc.text || '(no output)',
+      model:     `openclaw/${oc.model}`,
       tokens: {
         prompt:     promptTokens,
         completion: completionTokens,

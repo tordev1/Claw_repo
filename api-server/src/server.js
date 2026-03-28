@@ -235,6 +235,8 @@ async function buildServer() {
   fastify.get('/api/projects/:id', { preHandler: optionalAuthMiddleware }, routes.getProject);
   fastify.get('/api/projects/:id/tasks', { preHandler: optionalAuthMiddleware }, routes.getProjectTasks);
   fastify.patch('/api/projects/:id/status', { preHandler: [authMiddleware, validate(updateProjectStatusSchema)] }, routes.updateProjectStatus);
+  fastify.get('/api/projects/:id/report',      { preHandler: authMiddleware }, routes.getProjectReport);
+  fastify.get('/api/projects/:id/report.html', { preHandler: authMiddleware }, routes.getProjectReportHtml);
 
   // ============================================================================
   // TASK ROUTES - PHASE 3

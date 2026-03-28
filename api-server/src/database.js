@@ -699,6 +699,14 @@ class SQLiteAdapter {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN parent_task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL;`);
     } catch (err) { if (!err.message.includes('duplicate column')) console.warn('Note:', err.message); }
 
+    try {
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN estimated_cost REAL;`);
+    } catch (err) { if (!err.message.includes('duplicate column')) console.warn('Note:', err.message); }
+
+    try {
+      this.db.exec(`ALTER TABLE projects ADD COLUMN company_margin REAL DEFAULT 30;`);
+    } catch (err) { if (!err.message.includes('duplicate column')) console.warn('Note:', err.message); }
+
     // New indexes for Phase 3 tasks
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_tasks_assigned_agent ON tasks(agent_id, status);

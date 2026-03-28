@@ -28,6 +28,12 @@ function parseCorsOrigins() {
         'http://192.168.1.30:5173',
         'http://192.168.1.30:3000',
         'http://192.168.1.30:80',
+        'http://192.168.1.36:5173',
+        'http://192.168.1.36:3000',
+        'http://192.168.1.36:80',
+        'http://192.168.1.80:5173',
+        'http://192.168.1.80:3000',
+        'http://192.168.1.80:80',
       ];
     }
     // In production, if no CORS_ORIGIN set, only allow same-origin

@@ -21,8 +21,25 @@ scripts/.env
 *.db-wal
 *.sqlite
 
-# Logs
-logs/*.log
+# Logs & runtime files
+logs/
+*.pid
+*.lock
+
+# Docs (auto-generated)
+docs/
+
+# Screenshots / artifacts
+web-hq/artifacts/
+
+# Temp / verify scripts
+verify-*.js
+run-phase-test.js
+
+# Personal / unrelated files
+*.pdf
+tissert_*.md
+free-ride-*/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

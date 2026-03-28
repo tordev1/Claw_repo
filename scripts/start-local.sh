@@ -119,6 +119,7 @@ start_one_agent() {
   local name="$1"
   local handle="$2"
   local type="${3:-worker}"
+  local extra_args="${4:-}"
   mkdir -p "$AGENTS_DIR"
   local pid_file="$AGENTS_DIR/${handle}.pid"
   local log_file="$AGENTS_DIR/${handle}.log"
@@ -128,7 +129,7 @@ start_one_agent() {
     return
   fi
   cd "$REPO_ROOT/api-server"
-  node agentCLI.js --name "$name" --handle "$handle" --type "$type" >> "$log_file" 2>&1 &
+  node agentCLI.js --name "$name" --handle "$handle" --type "$type" $extra_args >> "$log_file" 2>&1 &
   echo $! > "$pid_file"
   sleep 1
   if kill -0 "$(cat "$pid_file")" 2>/dev/null; then
@@ -144,6 +145,7 @@ start_agents() {
   start_one_agent "Kotlet PM"         "kotlet_pm"  "pm"
   start_one_agent "Kotlet Ops Tester" "kotlet_ops" "worker"
   start_one_agent "TestAgent"         "testagent"  "worker"
+  # Seer is an OpenClaw agent (uses OpenAI via OpenClaw) — trigger via: acpx seer exec "run research"
 }
 
 # ── Start a single ad-hoc agent (legacy one-shot) ─────────────────────────────

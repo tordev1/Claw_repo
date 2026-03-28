@@ -72,6 +72,38 @@ const {
 } = require('./auth');
 
 // ============================================================================
+// COST ESTIMATION
+// ============================================================================
+
+const AGENT_HOURLY_RATE = { pm: 75, worker: 50, rnd: 60 };
+const API_COST_PER_HOUR = {
+  'ollama': 0,
+  'anthropic/claude-haiku-4-5-20251001': 0.08,
+  'anthropic/claude-sonnet-4-6': 0.45,
+  'anthropic/claude-opus-4-6': 2.50,
+  'openai/gpt-4o': 0.60,
+  'openai/gpt-4o-mini': 0.04,
+  'openrouter': 0.20,
+};
+
+function estimateTaskCost(estimatedHours, agentType, model) {
+  const h         = estimatedHours || 1;
+  const rate      = AGENT_HOURLY_RATE[agentType] || AGENT_HOURLY_RATE.worker;
+  const agentCost = h * rate;
+  const apiRate   = (model && API_COST_PER_HOUR[model] !== undefined)
+    ? API_COST_PER_HOUR[model]
+    : API_COST_PER_HOUR['openrouter'];
+  const apiCost   = h * apiRate;
+  return {
+    hours:      h,
+    agent_rate: rate,
+    agent_cost: parseFloat(agentCost.toFixed(2)),
+    api_cost:   parseFloat(apiCost.toFixed(2)),
+    total:      parseFloat((agentCost + apiCost).toFixed(2)),
+  };
+}
+
+// ============================================================================
 // PROJECT ROUTES
 // ============================================================================
 
@@ -102,7 +134,8 @@ async function listProjects(request, reply) {
       SELECT
         COUNT(*) as totalTasks,
         SUM(CASE WHEN status IN ('pending','running') THEN 1 ELSE 0 END) as activeTasks,
-        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completedTasks
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completedTasks,
+        SUM(COALESCE(estimated_cost, 0)) as estimatedCost
       FROM tasks WHERE project_id = ?
     `).get(p.id) || {};
     const costStats = db.prepare(`
@@ -111,16 +144,21 @@ async function listProjects(request, reply) {
         SUM(CASE WHEN strftime('%Y-%m', recorded_at) = strftime('%Y-%m', 'now') THEN cost_usd ELSE 0 END) as monthCost
       FROM cost_records WHERE project_id = ?
     `).get(p.id) || {};
+    const margin = p.company_margin || 30;
+    const rawCost = parseFloat((taskStats.estimatedCost || 0).toFixed(2));
     return {
       ...p,
       config: JSON.parse(p.config || '{}'),
       stats: {
-        totalTasks:    taskStats.totalTasks    || 0,
-        activeTasks:   taskStats.activeTasks   || 0,
-        completedTasks:taskStats.completedTasks || 0,
-        todayCost:     parseFloat((costStats.todayCost  || 0).toFixed(4)),
-        monthCost:     parseFloat((costStats.monthCost  || 0).toFixed(4)),
-        monthBudget:   0
+        totalTasks:     taskStats.totalTasks     || 0,
+        activeTasks:    taskStats.activeTasks    || 0,
+        completedTasks: taskStats.completedTasks || 0,
+        todayCost:      parseFloat((costStats.todayCost  || 0).toFixed(4)),
+        monthCost:      parseFloat((costStats.monthCost  || 0).toFixed(4)),
+        monthBudget:    0,
+        estimatedCost:  rawCost,
+        companyMargin:  margin,
+        clientPrice:    parseFloat((rawCost * (1 + margin / 100)).toFixed(2)),
       }
     };
   });
@@ -337,6 +375,158 @@ async function getProjectTasks(request, reply) {
   };
 }
 
+// GET /api/projects/:id/report — JSON cost+task report
+async function getProjectReport(request, reply) {
+  const db = getDb();
+  const { id } = request.params;
+
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
+  if (!project) { reply.code(404); return { error: 'Project not found' }; }
+
+  const tasks = db.prepare(`
+    SELECT t.*, ma.name as agent_name, ma.handle as agent_handle, ma.agent_type
+    FROM tasks t
+    LEFT JOIN manager_agents ma ON t.agent_id = ma.id
+    WHERE t.project_id = ?
+    ORDER BY t.created_at ASC
+  `).all(id).map(t => ({
+    ...t,
+    payload: (() => { try { return JSON.parse(t.payload || '{}'); } catch { return {}; } })(),
+    tags:    (() => { try { return JSON.parse(t.tags    || '[]'); } catch { return []; } })(),
+  }));
+
+  const margin = project.company_margin || 30;
+  let totalHours = 0, totalAgentCost = 0, totalApiCost = 0;
+  const byStatus = { pending: 0, running: 0, completed: 0, failed: 0, cancelled: 0 };
+
+  for (const t of tasks) {
+    const ce = t.payload.cost_estimate || {};
+    totalHours     += ce.hours      || t.estimated_hours || 0;
+    totalAgentCost += ce.agent_cost || 0;
+    totalApiCost   += ce.api_cost   || 0;
+    byStatus[t.status] = (byStatus[t.status] || 0) + 1;
+  }
+
+  const rawCost      = parseFloat((totalAgentCost + totalApiCost).toFixed(2));
+  const marginAmt    = parseFloat((rawCost * margin / 100).toFixed(2));
+  const clientPrice  = parseFloat((rawCost + marginAmt).toFixed(2));
+  const agentCount   = Math.max(1, new Set(tasks.filter(t => t.agent_id).map(t => t.agent_id)).size);
+  const calendarDays = Math.ceil(totalHours / 8 / agentCount);
+
+  return {
+    project: { id: project.id, name: project.name, description: project.description, status: project.status, company_margin: margin },
+    tasks,
+    summary: {
+      total_tasks:            tasks.length,
+      total_hours:            totalHours,
+      agent_cost:             parseFloat(totalAgentCost.toFixed(2)),
+      api_cost:               parseFloat(totalApiCost.toFixed(2)),
+      raw_cost:               rawCost,
+      company_margin_pct:     margin,
+      company_margin_amount:  marginAmt,
+      client_price:           clientPrice,
+      calendar_days_estimate: calendarDays,
+      tasks_by_status:        byStatus,
+    },
+    generated_at: new Date().toISOString(),
+  };
+}
+
+// GET /api/projects/:id/report.html — Standalone HTML deliverable
+async function getProjectReportHtml(request, reply) {
+  const report = await getProjectReport(request, reply);
+  if (report.error) return;
+
+  const { project, tasks, summary } = report;
+  const statusIcon = s => ({ completed: '✅', running: '⚙️', pending: '⏳', failed: '❌', cancelled: '🚫' }[s] || '❓');
+  const fmt = n => '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const rows = tasks.map(t => {
+    const ce = t.payload.cost_estimate || {};
+    return `<tr>
+      <td>${t.title}</td>
+      <td>${t.agent_name || '<em>unassigned</em>'}</td>
+      <td style="text-align:center">${ce.hours || t.estimated_hours || '—'}</td>
+      <td style="text-align:right">${ce.agent_cost != null ? fmt(ce.agent_cost) : '—'}</td>
+      <td style="text-align:right">${ce.api_cost  != null ? fmt(ce.api_cost)   : '—'}</td>
+      <td style="text-align:right"><b>${ce.total   != null ? fmt(ce.total)      : '—'}</b></td>
+      <td><span class="badge badge-${t.status}">${statusIcon(t.status)} ${t.status}</span></td>
+    </tr>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${project.name} — Project Report</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f7fa;color:#1a202c;padding:2rem}
+  .container{max-width:960px;margin:0 auto}
+  h1{font-size:1.8rem;font-weight:700;margin-bottom:.25rem}
+  .meta{color:#718096;margin-bottom:2rem;font-size:.9rem}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;margin-bottom:2rem}
+  .card{background:#fff;border-radius:10px;padding:1.25rem;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .card-label{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:#718096;margin-bottom:.4rem}
+  .card-value{font-size:1.5rem;font-weight:700}
+  .green{color:#38a169}.blue{color:#3182ce}.orange{color:#dd6b20}
+  table{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08);margin-bottom:2rem}
+  th{background:#2d3748;color:#fff;padding:.75rem 1rem;text-align:left;font-size:.78rem;text-transform:uppercase;letter-spacing:.05em}
+  td{padding:.7rem 1rem;border-bottom:1px solid #e2e8f0;font-size:.88rem}
+  tr:last-child td{border-bottom:none}
+  tr:hover td{background:#f7fafc}
+  .badge{padding:.2rem .5rem;border-radius:999px;font-size:.7rem;font-weight:600;white-space:nowrap}
+  .badge-completed{background:#c6f6d5;color:#276749}
+  .badge-running{background:#bee3f8;color:#2a69ac}
+  .badge-pending{background:#fefcbf;color:#744210}
+  .badge-failed{background:#fed7d7;color:#9b2c2c}
+  .badge-cancelled{background:#e2e8f0;color:#4a5568}
+  .summary-box{background:#2d3748;color:#fff;border-radius:10px;padding:1.5rem;margin-bottom:2rem}
+  .summary-box h2{margin-bottom:1rem;font-size:1rem;opacity:.8}
+  .summary-row{display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid rgba(255,255,255,.08);font-size:.9rem}
+  .summary-row:last-child{border-bottom:none;font-size:1.15rem;font-weight:700;padding-top:.8rem;color:#68d391}
+  footer{text-align:center;color:#a0aec0;font-size:.78rem;margin-top:2rem}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>📋 ${project.name}</h1>
+  <p class="meta">${project.description || ''}&nbsp;·&nbsp;Generated ${new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'})}</p>
+  <div class="cards">
+    <div class="card"><div class="card-label">Total Tasks</div><div class="card-value blue">${summary.total_tasks}</div></div>
+    <div class="card"><div class="card-label">Completed</div><div class="card-value green">${summary.tasks_by_status.completed}</div></div>
+    <div class="card"><div class="card-label">Est. Hours</div><div class="card-value">${summary.total_hours}h</div></div>
+    <div class="card"><div class="card-label">Timeline</div><div class="card-value orange">~${summary.calendar_days_estimate} days</div></div>
+    <div class="card"><div class="card-label">Client Price</div><div class="card-value green">${fmt(summary.client_price)}</div></div>
+  </div>
+  <table>
+    <thead><tr>
+      <th>Task</th><th>Agent</th>
+      <th style="text-align:center">Hours</th>
+      <th style="text-align:right">Agent Cost</th>
+      <th style="text-align:right">API Cost</th>
+      <th style="text-align:right">Total</th>
+      <th>Status</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div class="summary-box">
+    <h2>💰 Cost Breakdown</h2>
+    <div class="summary-row"><span>Agent Time (${summary.total_hours}h)</span><span>${fmt(summary.agent_cost)}</span></div>
+    <div class="summary-row"><span>API / AI Processing</span><span>${fmt(summary.api_cost)}</span></div>
+    <div class="summary-row"><span>Raw Cost</span><span>${fmt(summary.raw_cost)}</span></div>
+    <div class="summary-row"><span>Company Margin (${summary.company_margin_pct}%)</span><span>+ ${fmt(summary.company_margin_amount)}</span></div>
+    <div class="summary-row"><span>Client Price</span><span>${fmt(summary.client_price)}</span></div>
+  </div>
+  <footer>Project Claw · AI Agent Management Platform · Report auto-generated</footer>
+</div>
+</body>
+</html>`;
+
+  reply.type('text/html').send(html);
+}
+
 // POST /api/tasks - Create new task with optional assignment
 async function createTask(request, reply) {
   const db = getDb();
@@ -350,7 +540,9 @@ async function createTask(request, reply) {
     due_date,
     estimated_hours,
     tags = [],
-    payload = {}
+    payload = {},
+    agent_type: bodyAgentType,
+    model: bodyModel,
   } = request.body;
 
   if (!project_id || !title) {
@@ -386,12 +578,22 @@ async function createTask(request, reply) {
   const id = generateId();
   const now = new Date().toISOString();
 
+  // Determine agent type for cost estimation
+  let agentType = bodyAgentType || 'worker';
+  if (!bodyAgentType && agent_id) {
+    const agentRow = db.prepare('SELECT agent_type FROM manager_agents WHERE id = ?').get(agent_id);
+    if (agentRow) agentType = agentRow.agent_type || 'worker';
+  }
+  const model = bodyModel || 'ollama';
+  const costEstimate = estimateTaskCost(estimated_hours, agentType, model);
+  const payloadWithCost = { ...payload, cost_estimate: costEstimate };
+
   db.prepare(`
     INSERT INTO tasks (
-      id, project_id, agent_id, title, description, priority, 
-      assigned_by, assigned_at, due_date, estimated_hours, tags, 
-      payload, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      id, project_id, agent_id, title, description, priority,
+      assigned_by, assigned_at, due_date, estimated_hours, tags,
+      payload, estimated_cost, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     project_id,
@@ -404,7 +606,8 @@ async function createTask(request, reply) {
     due_date || null,
     estimated_hours || null,
     JSON.stringify(tags),
-    JSON.stringify(payload),
+    JSON.stringify(payloadWithCost),
+    costEstimate.total,
     now,
     now
   );
@@ -5069,6 +5272,8 @@ module.exports = {
   getProject,
   createProject,
   updateProjectStatus,
+  getProjectReport,
+  getProjectReportHtml,
 
   // Tasks - Phase 3
   getProjectTasks,
