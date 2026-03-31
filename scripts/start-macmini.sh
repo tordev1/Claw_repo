@@ -58,6 +58,13 @@ start_agent "Mini Worker 1" "miniworker1" "worker"
 start_agent "Mini Worker 2" "miniworker2" "worker"
 start_agent "Mini PM"       "minipm"      "pm"
 
+# OpenClaw gateway agent — no heartbeat so offline cron never evicts it
+echo "  Starting @openclaw (gateway, no-heartbeat)..."
+node "$AGENT_DIR/agentCLI.js" --name "OpenClaw" --handle "openclaw" --type "worker" --no-heartbeat \
+    >> "$LOG_DIR/openclaw.log" 2>&1 &
+echo $! > "$LOG_DIR/openclaw.pid"
+sleep 1
+
 echo ""
 echo "✓ All agents started. Logs in $LOG_DIR"
 echo "  Press Ctrl+C to stop all agents."

@@ -30,6 +30,7 @@ const AGENT_TYPE = get('--type', 'worker'); // pm | worker | rnd
 const AGENT_MODE = get('--mode', null);     // e.g. saas, mobile_app (PM modes)
 const AGENT_DIVISION = get('--division', null); // e.g. ai_ml_research (R&D divisions)
 const MACHINE_IP = process.env.MACHINE_IP || null; // LAN IP of this machine
+const NO_HEARTBEAT = args.includes('--no-heartbeat'); // gateway agents: skip heartbeat so offline cron never evicts them
 
 const C = { G: '\x1b[32m', Y: '\x1b[33m', C: '\x1b[36m', R: '\x1b[31m', B: '\x1b[1m', X: '\x1b[0m', A: '\x1b[33m' };
 const log = (tag, msg, c = C.X) => console.log(`${c}[${new Date().toLocaleTimeString()}] [${tag}]${C.X} ${msg}`);
@@ -620,10 +621,13 @@ async function main() {
     setInterval(() => pollNotifications(agentId, userToken), 15000);
 
     // HTTP heartbeat every 30s — keeps agent status = online, triggers offline detection if CLI stops
-    const sendHeartbeat = () => req('POST', `/api/agents/${agentId}/heartbeat`, {}, userToken)
-        .catch(() => {}); // silent fail — WS reconnect will handle
-    sendHeartbeat(); // immediate first beat
-    setInterval(sendHeartbeat, 30000);
+    // Skip if --no-heartbeat (gateway agents that should never be evicted by the offline cron)
+    if (!NO_HEARTBEAT) {
+        const sendHeartbeat = () => req('POST', `/api/agents/${agentId}/heartbeat`, {}, userToken)
+            .catch(() => {}); // silent fail — WS reconnect will handle
+        sendHeartbeat(); // immediate first beat
+        setInterval(sendHeartbeat, 30000);
+    }
 
     console.log(`\n${C.B}${C.G}╔══════════════════════════════════════╗`);
     console.log(`║  ${AGENT_NAME} is ONLINE  ║`);
