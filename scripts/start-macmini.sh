@@ -7,6 +7,9 @@ REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 AGENT_DIR="$REPO_DIR/api-server"
 LOG_DIR="$REPO_DIR/logs/macmini"
 
+# Ensure Homebrew node is in PATH (not loaded when running via SSH)
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH"
+
 export API_URL="${API_URL:-http://192.168.1.86:3001}"
 export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://localhost:11434}"
 export MACHINE_IP="${MACHINE_IP:-$(hostname -I 2>/dev/null | awk '{print $1}' || echo '127.0.0.1')}"
