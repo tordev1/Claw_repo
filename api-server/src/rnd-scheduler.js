@@ -24,14 +24,14 @@ const DIVISION_DEFAULTS = {
   competitive_intel: 'weekly',
 };
 
-// Default models per division (from spec)
+// Default models per division
 const DIVISION_MODELS = {
-  ai_ml_research: 'claude-haiku-4-5',
-  tech_frameworks: 'claude-haiku-4-5',
+  ai_ml_research: 'claude-sonnet-4-6',
+  tech_frameworks: 'claude-sonnet-4-6',
   security_intel: 'claude-sonnet-4-6',
-  oss_scout: 'claude-haiku-4-5',
-  tooling_infra: 'claude-haiku-4-5',
-  competitive_intel: 'claude-haiku-4-5',
+  oss_scout: 'claude-sonnet-4-6',
+  tooling_infra: 'claude-sonnet-4-6',
+  competitive_intel: 'claude-sonnet-4-6',
 };
 
 /**
@@ -90,7 +90,7 @@ async function executeRndResearch(agentId, wsManager) {
   const userPrompt = `Run your scheduled research scan for ${agent.rnd_division.replace(/_/g, ' ')}. Report any new developments, emerging tools, security issues, or notable changes since your last scan. Focus on actionable findings.`;
 
   // Get model for this division
-  const model = agent.current_model || DIVISION_MODELS[agent.rnd_division] || 'claude-haiku-4-5';
+  const model = agent.current_model || DIVISION_MODELS[agent.rnd_division] || 'claude-sonnet-4-6';
 
   let result;
   const apiKey = process.env.OPENROUTER_API_KEY;
@@ -346,7 +346,7 @@ function getSchedulerStatus() {
     scheduled: activeJobs.has(agent.id),
     cron_expression: getCronExpression(agent),
     default_schedule: DIVISION_DEFAULTS[agent.rnd_division] || 'daily',
-    model: DIVISION_MODELS[agent.rnd_division] || 'claude-haiku-4-5',
+    model: DIVISION_MODELS[agent.rnd_division] || 'claude-sonnet-4-6',
   }));
 }
 

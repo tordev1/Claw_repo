@@ -109,7 +109,7 @@ async function spawnSubAgent(options) {
 
 // ── LLM Call via OpenRouter ─────────────────────────────────────────────────
 async function callLLM(systemPrompt, userPrompt, agent, apiKey) {
-  const model = agent.current_model || 'anthropic/claude-haiku-4-5-20251001';
+  const model = agent.current_model || 'anthropic/claude-sonnet-4-6';
 
   const messages = [
     { role: 'system', content: systemPrompt },

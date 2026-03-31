@@ -149,11 +149,11 @@ const OLLAMA_TEMPERATURE = parseFloat(process.env.OLLAMA_TEMPERATURE || '0.2');
 
 const OPENROUTER_HOST = 'openrouter.ai';
 
-// Default model per agent type — cheap & fast by default
+// Default model per agent type
 const DEFAULT_MODELS = {
-  pm:     'anthropic/claude-haiku-4-5-20251001',
+  pm:     'anthropic/claude-sonnet-4-6',
   rnd:    'anthropic/claude-sonnet-4-6',
-  worker: 'anthropic/claude-haiku-4-5-20251001',
+  worker: 'anthropic/claude-sonnet-4-6',
 };
 
 // Cost per 1M tokens (fallback pricing)
