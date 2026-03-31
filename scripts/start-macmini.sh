@@ -7,9 +7,9 @@ REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 AGENT_DIR="$REPO_DIR/api-server"
 LOG_DIR="$REPO_DIR/logs/macmini"
 
-export API_URL="${API_URL:-http://192.168.1.80:3001}"
-export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://192.168.1.67:11434}"
-export MACHINE_IP="${MACHINE_IP:-192.168.1.67}"
+export API_URL="${API_URL:-http://192.168.1.86:3001}"
+export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://localhost:11434}"
+export MACHINE_IP="${MACHINE_IP:-$(hostname -I 2>/dev/null | awk '{print $1}' || echo '127.0.0.1')}"
 export OLLAMA_MODEL_WORKER="${OLLAMA_MODEL_WORKER:-huihui_ai/qwen3.5-abliterated:9b-Claude}"
 
 mkdir -p "$LOG_DIR"
