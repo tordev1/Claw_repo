@@ -151,9 +151,9 @@ const OPENROUTER_HOST = 'openrouter.ai';
 
 // Default model per agent type
 const DEFAULT_MODELS = {
-  pm:     'anthropic/claude-sonnet-4-6',
-  rnd:    'anthropic/claude-sonnet-4-6',
-  worker: 'anthropic/claude-sonnet-4-6',
+  pm:     'anthropic/claude-opus-4-6',
+  rnd:    'anthropic/claude-opus-4-6',
+  worker: 'anthropic/claude-opus-4-6',
 };
 
 // Cost per 1M tokens (fallback pricing)
