@@ -786,10 +786,15 @@ class SQLiteAdapter {
       [`ALTER TABLE manager_agents ADD COLUMN last_heartbeat TEXT;`, 'last_heartbeat'],
       [`ALTER TABLE manager_agents ADD COLUMN project_id TEXT;`, 'project_id'],
       [`ALTER TABLE manager_agents ADD COLUMN ollama_host TEXT;`, 'ollama_host'],
+      [`ALTER TABLE manager_agents ADD COLUMN session_state TEXT DEFAULT '{}';`, 'session_state'],
+      [`ALTER TABLE manager_agents ADD COLUMN monthly_budget_usd REAL;`, 'monthly_budget_usd'],
     ];
     for (const [sql] of agentCols) {
       try { this.db.exec(sql); } catch (e) { /* column already exists */ }
     }
+
+    // tasks.log_path — stores path to Claude CLI execution log
+    try { this.db.exec(`ALTER TABLE tasks ADD COLUMN log_path TEXT;`); } catch (e) { /* already exists */ }
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_manager_agents_type ON manager_agents(agent_type);`);
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_manager_agents_mode ON manager_agents(current_mode);`);
 
