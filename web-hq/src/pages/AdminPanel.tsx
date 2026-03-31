@@ -10,10 +10,11 @@ const TYPE_META: Record<string, { icon: React.ReactNode; color: string; label: s
 const getTypeMeta = (t?: string) => TYPE_META[t ?? ''] ?? TYPE_META['worker'];
 
 export default function AdminPanel() {
-  const [tab, setTab] = useState<'pending' | 'approved' | 'users'>('pending');
+  const [tab, setTab] = useState<'pending' | 'approved' | 'users' | 'pending_users'>('pending');
   const [pending, setPending] = useState<any[]>([]);
   const [approved, setApproved] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
+  const [pendingUsers, setPendingUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [actLoad, setActLoad] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -25,14 +26,16 @@ export default function AdminPanel() {
   const fetchData = async () => {
     setLoading(true); setError(null);
     try {
-      const [pData, aData, uData] = await Promise.allSettled([
+      const [pData, aData, uData, puData] = await Promise.allSettled([
         adminApi.getPendingAgents(),
         adminApi.getApprovedAgents(),
         adminApi.getUsers(),
+        fetch('/api/admin/users/pending', { headers: { 'Authorization': `Bearer ${localStorage.getItem('claw_token')}` } }).then(r => r.json()),
       ]);
       setPending(pData.status === 'fulfilled' ? (pData.value?.agents || pData.value || []) : []);
       setApproved(aData.status === 'fulfilled' ? (aData.value?.agents || aData.value || []) : []);
       setUsers(uData.status === 'fulfilled' ? (uData.value?.users || uData.value || []) : []);
+      setPendingUsers(puData.status === 'fulfilled' ? (puData.value?.users || []) : []);
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
   };
@@ -50,13 +53,20 @@ export default function AdminPanel() {
     const onStatusChanged = (d: any) => {
       setApproved(prev => prev.map(a => a.id === d.agent_id ? { ...a, status: d.status } : a));
     };
+    const onUserRegistered = (d: any) => {
+      const u = d?.user || d;
+      setPendingUsers(prev => prev.some(x => x.id === u.id) ? prev : [u, ...prev]);
+      setOk(`New user "${u.name || u.login}" is waiting for approval`);
+    };
     wsClient.on('agent:registered', onRegistered);
     wsClient.on('agent:approved', onApproved);
     wsClient.on('agent:status_changed', onStatusChanged);
+    wsClient.on('user:registered', onUserRegistered);
     return () => {
       wsClient.off('agent:registered', onRegistered);
       wsClient.off('agent:approved', onApproved);
       wsClient.off('agent:status_changed', onStatusChanged);
+      wsClient.off('user:registered', onUserRegistered);
     };
   }, []);
 
@@ -85,6 +95,23 @@ export default function AdminPanel() {
     finally { setActLoad(null); }
   };
 
+  const approveUser = async (id: string) => {
+    setActLoad(id);
+    try {
+      await fetch(`/api/admin/users/${id}/approve`, { method: 'POST', headers: { 'Authorization': `Bearer ${localStorage.getItem('claw_token')}` } });
+      setOk('User approved'); setPendingUsers(p => p.filter(u => u.id !== id)); fetchData();
+    } catch (e: any) { setError(e.message); }
+    finally { setActLoad(null); }
+  };
+  const rejectUser = async (id: string) => {
+    setActLoad(id);
+    try {
+      await fetch(`/api/admin/users/${id}/reject`, { method: 'POST', headers: { 'Authorization': `Bearer ${localStorage.getItem('claw_token')}` } });
+      setOk('User rejected'); setPendingUsers(p => p.filter(u => u.id !== id));
+    } catch (e: any) { setError(e.message); }
+    finally { setActLoad(null); }
+  };
+
   const runSweep = async () => {
     setSweeping(true); setError(null); setOk(null); setSweepResult(null);
     try {
@@ -106,7 +133,8 @@ export default function AdminPanel() {
   const TABS = [
     { id: 'pending', label: 'Pending Agents', icon: <Bot size={11} />, count: pending.length, color: '#faa81a' },
     { id: 'approved', label: 'Approved Agents', icon: <UserCheck size={11} />, count: approved.length, color: '#10b981' },
-    { id: 'users', label: 'All Users', icon: <Users size={11} />, count: users.length, color: '#60a5fa' },
+    { id: 'pending_users', label: 'Pending Users', icon: <Users size={11} />, count: pendingUsers.length, color: '#f87171' },
+    { id: 'users', label: 'All Users', icon: <UserCheck size={11} />, count: users.length, color: '#60a5fa' },
   ];
 
   if (loading) return (
@@ -256,6 +284,39 @@ export default function AdminPanel() {
                     </td>
                   </tr>
                   ); })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* Pending Users */}
+      {tab === 'pending_users' && (
+        <div className="ops-panel p-0 overflow-hidden">
+          {pendingUsers.length === 0 ? (
+            <p style={{ ...mono, fontSize: 11, color: 'var(--text-lo)', padding: '32px 0', textAlign: 'center' }}>— no pending user registrations —</p>
+          ) : (
+            <table className="ops-table w-full">
+              <thead><tr><th>Name</th><th>Login</th><th>Email</th><th>Requested</th><th>Actions</th></tr></thead>
+              <tbody>
+                {pendingUsers.map(u => (
+                  <tr key={u.id}>
+                    <td><span style={{ color: 'var(--text-hi)' }}>{u.name}</span></td>
+                    <td><span style={{ ...mono, fontSize: 11 }}>{u.login}</span></td>
+                    <td style={{ color: 'var(--text-lo)', fontSize: 11 }}>{u.email}</td>
+                    <td style={{ color: 'var(--text-lo)', fontSize: 10 }}>{u.created_at ? ago(u.created_at) : '—'}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button onClick={() => approveUser(u.id)} disabled={actLoad === u.id} className="ops-btn" style={{ color: '#10b981', borderColor: '#10b98133' }}>
+                          {actLoad === u.id ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle size={11} />} Approve
+                        </button>
+                        <button onClick={() => rejectUser(u.id)} disabled={actLoad === u.id} className="ops-btn" style={{ color: '#f87171', borderColor: '#f8717133' }}>
+                          {actLoad === u.id ? <Loader2 size={11} className="animate-spin" /> : <XCircle size={11} />} Reject
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           )}

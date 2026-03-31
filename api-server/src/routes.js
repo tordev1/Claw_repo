@@ -1203,11 +1203,17 @@ async function startTask(request, reply) {
 
   const now = new Date().toISOString();
 
-  db.prepare(`
+  // Atomic checkout — prevents two agents from starting the same task simultaneously
+  const startResult = db.prepare(`
     UPDATE tasks
     SET status = 'running', started_at = ?, updated_at = ?
-    WHERE id = ?
+    WHERE id = ? AND status = 'pending'
   `).run(now, now, id);
+
+  if (startResult.changes === 0) {
+    reply.code(409);
+    return { error: 'Task already claimed by another agent' };
+  }
 
   // Agent is now working — update their status
   syncAgentStatus(db, task.agent_id);
@@ -1350,9 +1356,34 @@ async function executeTaskRoute(request, reply) {
 
   const project = { id: task.project_id, name: task.project_name, description: task.project_description };
 
+  // ── Budget enforcement ────────────────────────────────────────────────────
+  if (agent.monthly_budget_usd != null) {
+    const monthStart = new Date();
+    monthStart.setUTCDate(1); monthStart.setUTCHours(0, 0, 0, 0);
+    const spent = db.prepare(`
+      SELECT COALESCE(SUM(cost_usd), 0) as total
+      FROM cost_records
+      WHERE json_extract(metadata, '$.agent_id') = ? AND recorded_at >= ?
+    `).get(agent.id, monthStart.toISOString());
+    if (spent.total >= agent.monthly_budget_usd) {
+      reply.code(402);
+      return { error: `Agent monthly budget exceeded ($${spent.total.toFixed(4)} / $${agent.monthly_budget_usd})` };
+    }
+  }
+
   try {
     const { executeTask } = require('./ai-executor');
-    const execResult = await executeTask(task, agent, project);
+
+    // Stream Claude output live to all connected WS clients watching this task
+    const onChunk = (chunk) => {
+      wsManager.broadcast('task:execution_stream', {
+        task_id:   id,
+        chunk:     chunk,
+        timestamp: new Date().toISOString(),
+      });
+    };
+
+    const execResult = await executeTask(task, agent, project, onChunk);
 
     // Log provider used — visible in api-server output for debugging
     const _providerLabel = execResult.skipped
@@ -1363,9 +1394,29 @@ async function executeTaskRoute(request, reply) {
     const now = new Date().toISOString();
     const resultText = execResult.result;
 
-    // Complete the task with real AI result
-    db.prepare(`UPDATE tasks SET status='completed', result=?, completed_at=?, updated_at=? WHERE id=?`)
-      .run(resultText, now, now, id);
+    // Complete the task with real AI result + log path
+    db.prepare(`UPDATE tasks SET status='completed', result=?, log_path=?, completed_at=?, updated_at=? WHERE id=?`)
+      .run(resultText, execResult.log_path || null, now, now, id);
+
+    // Update agent session state — persist task context for future runs
+    try {
+      const prevState = (() => { try { return JSON.parse(agent.session_state || '{}'); } catch { return {}; } })();
+      const recent = prevState.recent_work || [];
+      recent.push({
+        task:      task.title,
+        task_id:   id,
+        workspace: execResult.workspace_path || null,
+        files:     execResult.files_created  || [],
+        done_at:   now,
+      });
+      const newState = {
+        tasks_done:   (prevState.tasks_done || 0) + 1,
+        last_updated: now,
+        recent_work:  recent.slice(-10), // keep last 10
+      };
+      db.prepare(`UPDATE manager_agents SET session_state=? WHERE id=?`)
+        .run(JSON.stringify(newState), agent.id);
+    } catch (e) { console.error('[execute] session update error:', e.message); }
 
     // Sync agent status — set to idle if no other running tasks
     syncAgentStatus(db, agent.id);
@@ -5156,6 +5207,43 @@ async function listUsersRoute(request, reply) {
   }
 }
 
+async function listPendingUsersRoute(request, reply) {
+  const user = request.user;
+  if (!user || user.role !== 'admin') { reply.code(403); return { error: 'Admin access required' }; }
+  try {
+    const db = getDb();
+    const users = db.prepare(`SELECT id, name, login, email, role, created_at FROM users WHERE is_active = FALSE AND id != 'user-scorpion-001' ORDER BY created_at DESC`).all();
+    return { users };
+  } catch (err) { reply.code(500); return { error: err.message }; }
+}
+
+async function approveUserRoute(request, reply) {
+  const user = request.user;
+  if (!user || user.role !== 'admin') { reply.code(403); return { error: 'Admin access required' }; }
+  try {
+    const db = getDb();
+    const { id } = request.params;
+    const target = db.prepare('SELECT id, name, login FROM users WHERE id = ?').get(id);
+    if (!target) { reply.code(404); return { error: 'User not found' }; }
+    db.prepare('UPDATE users SET is_active = TRUE WHERE id = ?').run(id);
+    wsManager.broadcast('user:approved', { user: { id: target.id, name: target.name, login: target.login } });
+    return { success: true, message: `User ${target.login} approved` };
+  } catch (err) { reply.code(500); return { error: err.message }; }
+}
+
+async function rejectUserRoute(request, reply) {
+  const user = request.user;
+  if (!user || user.role !== 'admin') { reply.code(403); return { error: 'Admin access required' }; }
+  try {
+    const db = getDb();
+    const { id } = request.params;
+    const target = db.prepare('SELECT id, login FROM users WHERE id = ?').get(id);
+    if (!target) { reply.code(404); return { error: 'User not found' }; }
+    db.prepare('DELETE FROM users WHERE id = ?').run(id);
+    return { success: true, message: `User ${target.login} rejected and removed` };
+  } catch (err) { reply.code(500); return { error: err.message }; }
+}
+
 // ============================================================================
 // ACTIVITY HISTORY ROUTE
 // ============================================================================
@@ -5259,6 +5347,71 @@ async function getPresetRoute(request, reply) {
   return preset;
 }
 
+// ── Workspace routes ──────────────────────────────────────────────────────────
+const _fs   = require('fs');
+const _path = require('path');
+const WORKSPACES_DIR = _path.resolve(__dirname, '../../workspaces');
+const EXEC_LOGS_DIR  = _path.resolve(__dirname, '../../logs/executions');
+
+// GET /api/tasks/:id/workspace — list files in task workspace
+async function getTaskWorkspace(request, reply) {
+  const { id } = request.params;
+  const workspacePath = _path.join(WORKSPACES_DIR, id);
+
+  if (!_fs.existsSync(workspacePath)) {
+    return { files: [], workspace_path: null };
+  }
+
+  function listFiles(dir, base = '') {
+    let results = [];
+    for (const entry of _fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.name === '__pycache__') continue;
+      const rel = base ? `${base}/${entry.name}` : entry.name;
+      const full = _path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        results = results.concat(listFiles(full, rel));
+      } else {
+        const stat = _fs.statSync(full);
+        results.push({ name: rel, size: stat.size, modified: stat.mtime.toISOString() });
+      }
+    }
+    return results;
+  }
+
+  return { files: listFiles(workspacePath), workspace_path: workspacePath };
+}
+
+// GET /api/tasks/:id/workspace/file?name=<relpath> — read a file from workspace
+async function getWorkspaceFile(request, reply) {
+  const { id } = request.params;
+  const { name } = request.query;
+  if (!name) { reply.code(400); return { error: 'name query param required' }; }
+
+  // Prevent path traversal
+  const workspacePath = _path.join(WORKSPACES_DIR, id);
+  const filePath = _path.resolve(workspacePath, name);
+  if (!filePath.startsWith(workspacePath)) { reply.code(403); return { error: 'Forbidden' }; }
+
+  if (!_fs.existsSync(filePath)) { reply.code(404); return { error: 'File not found' }; }
+
+  const content = _fs.readFileSync(filePath, 'utf8');
+  return { name, content, size: Buffer.byteLength(content) };
+}
+
+// GET /api/tasks/:id/log — get execution log
+async function getTaskLog(request, reply) {
+  const { id } = request.params;
+
+  // Try log_path from DB first
+  const db = getDb();
+  const task = db.prepare('SELECT log_path FROM tasks WHERE id = ?').get(id);
+  const logPath = task?.log_path || _path.join(EXEC_LOGS_DIR, `${id}.log`);
+
+  if (!_fs.existsSync(logPath)) { return { log: null }; }
+  const log = _fs.readFileSync(logPath, 'utf8');
+  return { log, size: log.length, log_path: logPath };
+}
+
 // POST /api/presets/sync - Sync filesystem presets to database
 async function syncPresetsRoute(request, reply) {
   const presets = require('./presets');
@@ -5289,6 +5442,9 @@ module.exports = {
   executeTaskRoute,
   cancelTask,
   addTaskComment,
+  getTaskWorkspace,
+  getWorkspaceFile,
+  getTaskLog,
   getTaskUpdates,
   addTaskUpdate,
   getAgentTasks,
@@ -5393,6 +5549,9 @@ module.exports = {
   // User Notifications
   getNotificationsRoute,
   listUsersRoute,
+  listPendingUsersRoute,
+  approveUserRoute,
+  rejectUserRoute,
   markNotificationReadRoute,
   markAllNotificationsReadRoute,
 

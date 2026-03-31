@@ -1,47 +1,52 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { rndApi, wsClient } from '../services/api';
 import type { RndAgent, RndFinding } from '../services/api';
-import { FlaskConical, Loader2, RefreshCw, Play, Clock, ChevronDown, ChevronUp, CheckCircle } from 'lucide-react';
+import { FlaskConical, Loader2, RefreshCw, Play, Clock, ChevronDown, ChevronRight, Zap, Activity } from 'lucide-react';
 
 const SCHEDULE_OPTIONS = [
-  { value: 'every_4h', label: 'Every 4 hours' },
-  { value: 'every_6h', label: 'Every 6 hours' },
-  { value: 'daily', label: 'Daily' },
-  { value: 'weekly', label: 'Weekly' },
+  { value: 'every_4h', label: 'Every 4h' },
+  { value: 'every_6h', label: 'Every 6h' },
+  { value: 'daily',    label: 'Daily' },
+  { value: 'weekly',   label: 'Weekly' },
 ];
 
-const IMPACT_COLORS: Record<string, string> = {
-  low: 'bg-green-500/20 text-green-400',
-  medium: 'bg-yellow-500/20 text-yellow-400',
-  high: 'bg-orange-500/20 text-orange-400',
-  critical: 'bg-red-500/20 text-red-400',
+const IMPACT_STYLE: Record<string, { color: string; bg: string }> = {
+  low:      { color: '#10b981', bg: 'rgba(16,185,129,0.1)' },
+  medium:   { color: '#faa81a', bg: 'rgba(250,168,26,0.1)' },
+  high:     { color: '#f97316', bg: 'rgba(249,115,22,0.1)' },
+  critical: { color: '#ef4444', bg: 'rgba(239,68,68,0.1)'  },
+};
+
+const DIVISION_COLOR: Record<string, string> = {
+  ai_ml_research:     '#818cf8',
+  security_research:  '#f87171',
+  market_research:    '#34d399',
+  product_research:   '#60a5fa',
+  general_research:   '#94a3b8',
 };
 
 function timeAgo(ts: string | null): string {
-  if (!ts) return 'Never';
+  if (!ts) return 'never';
   const diff = Date.now() - new Date(ts).getTime();
-  const mins = Math.floor(diff / 60000);
+  const mins  = Math.floor(diff / 60000);
   const hours = Math.floor(diff / 3600000);
-  const days = Math.floor(diff / 86400000);
-  if (mins < 1) return 'Just now';
+  const days  = Math.floor(diff / 86400000);
+  if (mins < 1)  return 'just now';
   if (mins < 60) return `${mins}m ago`;
   if (hours < 24) return `${hours}h ago`;
-  if (days < 7) return `${days}d ago`;
-  return new Date(ts).toLocaleDateString();
+  return `${days}d ago`;
 }
 
 export default function RndPanel() {
-  const [agents, setAgents] = useState<RndAgent[]>([]);
-  const [feed, setFeed] = useState<RndFinding[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [executing, setExecuting] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [toast, setToast] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+  const mono: React.CSSProperties = { fontFamily: 'var(--font-mono)' };
 
-  const showToast = (type: 'success' | 'error', msg: string) => {
-    setToast({ type, msg });
-    setTimeout(() => setToast(null), 3000);
-  };
+  const [agents, setAgents]       = useState<RndAgent[]>([]);
+  const [feed, setFeed]           = useState<RndFinding[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [executing, setExecuting] = useState<string | null>(null);
+  const [expanded, setExpanded]   = useState<Set<string>>(new Set());
+  const [liveOutput, setLiveOutput] = useState<Record<string, string>>({});
+  const feedRef = useRef<HTMLDivElement>(null);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -50,55 +55,46 @@ export default function RndPanel() {
         rndApi.getFeed(),
       ]);
       if (statusRes.status === 'fulfilled') setAgents(statusRes.value.agents || []);
-      if (feedRes.status === 'fulfilled') setFeed(feedRes.value.messages || []);
-    } catch {
-      // errors handled by global handler
+      if (feedRes.status  === 'fulfilled') setFeed(feedRes.value.messages   || []);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    fetchAll();
-  }, [fetchAll]);
+  useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // Live update when a new finding is posted via WS
+  // Live updates when finding posted
   useEffect(() => {
     const onFinding = () => {
-      rndApi.getFeed().then(res => setFeed(res.messages || [])).catch(() => {});
-      rndApi.getStatus().then(res => setAgents(res.agents || [])).catch(() => {});
+      rndApi.getFeed().then(r => setFeed(r.messages || [])).catch(() => {});
+      rndApi.getStatus().then(r => setAgents(r.agents || [])).catch(() => {});
     };
     wsClient.on('rnd:findings_posted', onFinding);
     return () => wsClient.off('rnd:findings_posted', onFinding);
   }, []);
 
-  // Auto-refresh feed every 30 seconds
+  // Auto-refresh feed every 30s
   useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const res = await rndApi.getFeed();
-        setFeed(res.messages || []);
-      } catch {
-        // silent
-      }
+    const t = setInterval(() => {
+      rndApi.getFeed().then(r => setFeed(r.messages || [])).catch(() => {});
     }, 30000);
-    return () => clearInterval(interval);
+    return () => clearInterval(t);
   }, []);
 
   const handleExecute = async (agentId: string) => {
     setExecuting(agentId);
+    setLiveOutput(prev => ({ ...prev, [agentId]: '' }));
     try {
       const res = await rndApi.execute(agentId);
-      showToast('success', `Execution complete — impact: ${res.impact_level}`);
-      // Refresh data
+      setLiveOutput(prev => ({ ...prev, [agentId]: `✓ Complete — impact: ${res.impact_level}` }));
       const [statusRes, feedRes] = await Promise.allSettled([
         rndApi.getStatus(),
         rndApi.getFeed(),
       ]);
       if (statusRes.status === 'fulfilled') setAgents(statusRes.value.agents || []);
-      if (feedRes.status === 'fulfilled') setFeed(feedRes.value.messages || []);
+      if (feedRes.status  === 'fulfilled') setFeed(feedRes.value.messages   || []);
     } catch (e: any) {
-      showToast('error', e.message || 'Execution failed');
+      setLiveOutput(prev => ({ ...prev, [agentId]: `✗ ${e.message || 'failed'}` }));
     } finally {
       setExecuting(null);
     }
@@ -107,213 +103,176 @@ export default function RndPanel() {
   const handleScheduleChange = async (agentId: string, schedule: string) => {
     try {
       await rndApi.updateSchedule(agentId, schedule);
-      showToast('success', 'Schedule updated');
       setAgents(prev => prev.map(a => a.id === agentId ? { ...a, rnd_schedule: schedule } : a));
-    } catch (e: any) {
-      showToast('error', e.message || 'Failed to update schedule');
-    }
+    } catch { /* ignore */ }
   };
 
-  const toggleExpand = (id: string) => {
-    setExpanded(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  if (loading) {
-    return (
-      <div className="bg-gray-900 min-h-screen flex items-center justify-center">
-        <Loader2 className="animate-spin text-indigo-400" size={32} />
-      </div>
-    );
-  }
+  if (loading) return (
+    <div className="flex items-center justify-center h-64 gap-3">
+      <Loader2 size={14} className="animate-spin" style={{ color: 'var(--amber)' }} />
+      <span style={{ ...mono, fontSize: 11, color: 'var(--text-lo)' }}>LOADING R&D...</span>
+    </div>
+  );
 
   return (
-    <div className="min-h-screen" style={{ background: 'var(--ink-1)' }}>
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed top-4 right-4 z-50 px-4 py-2 rounded-lg text-sm font-medium shadow-lg ${
-          toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
-        }`}>
-          {toast.msg}
-        </div>
-      )}
+    <div className="space-y-8 animate-fade-up">
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <FlaskConical size={22} className="text-indigo-400" />
-          <div>
-            <h1 className="text-xl font-bold text-white">R&D Control Panel</h1>
-            <p className="text-gray-500 text-sm">{agents.length} research agents</p>
-          </div>
+          <FlaskConical size={16} style={{ color: '#818cf8' }} />
+          <span style={{ ...mono, fontSize: 14, fontWeight: 700, color: 'var(--text-hi)', letterSpacing: '-0.01em' }}>R&D CONTROL</span>
+          <span style={{ ...mono, fontSize: 10, color: 'var(--text-lo)', background: 'var(--ink-3)', border: '1px solid var(--ink-4)', borderRadius: 2, padding: '2px 7px' }}>{agents.length} AGENTS</span>
         </div>
-        <button
-          onClick={fetchAll}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-white border border-gray-700 hover:border-gray-600 transition-colors"
-        >
-          <RefreshCw size={14} />
-          Refresh
+        <button onClick={fetchAll} style={{ ...mono, fontSize: 10, color: 'var(--text-lo)', background: 'var(--ink-2)', border: '1px solid var(--ink-4)', borderRadius: 2, padding: '5px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
+          <RefreshCw size={10} /> REFRESH
         </button>
       </div>
 
-      {/* Section 1: R&D Agents */}
-      <div className="mb-8">
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">Agents Overview</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {agents.map(agent => (
-            <div key={agent.id} className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-              {/* Top row: name + status */}
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                    agent.status === 'online' || agent.status === 'working' ? 'bg-green-400' : 'bg-gray-500'
-                  }`} />
-                  <span className="text-white font-medium truncate">{agent.name}</span>
-                </div>
-                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-500/20 text-indigo-400 flex-shrink-0">
-                  {agent.rnd_division}
-                </span>
-              </div>
-
-              {/* Model badge */}
-              <div className="mb-3">
-                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-700 text-gray-300">
-                  {agent.model}
-                </span>
-              </div>
-
-              {/* Schedule */}
-              <div className="flex items-center gap-2 mb-3">
-                <Clock size={12} className="text-gray-500" />
-                <select
-                  value={agent.rnd_schedule || agent.default_schedule || 'daily'}
-                  onChange={e => handleScheduleChange(agent.id, e.target.value)}
-                  className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-indigo-500"
-                >
-                  {SCHEDULE_OPTIONS.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-                {agent.scheduled && (
-                  <span className="flex items-center gap-1 text-green-400 text-xs">
-                    <CheckCircle size={12} />
-                    Scheduled
-                  </span>
-                )}
-              </div>
-
-              {/* Last run */}
-              <div className="text-xs text-gray-500 mb-3">
-                Last run: {timeAgo(agent.rnd_last_run)}
-              </div>
-
-              {/* Run Now button */}
-              <button
-                onClick={() => handleExecute(agent.id)}
-                disabled={executing === agent.id || !agent.is_approved}
-                className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  executing === agent.id
-                    ? 'bg-indigo-600/50 text-indigo-300 cursor-wait'
-                    : !agent.is_approved
-                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                    : 'bg-indigo-600 hover:bg-indigo-500 text-white'
-                }`}
-              >
-                {executing === agent.id ? (
-                  <>
-                    <Loader2 size={14} className="animate-spin" />
-                    Running...
-                  </>
-                ) : (
-                  <>
-                    <Play size={14} />
-                    Run Now
-                  </>
-                )}
-              </button>
-            </div>
-          ))}
-
-          {agents.length === 0 && (
-            <div className="col-span-full text-center py-12 text-gray-500">
-              No R&D agents registered yet.
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Section 2: R&D Feed */}
-      <div>
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">Research Feed</h2>
-        <div className="space-y-3">
-          {feed.map(finding => {
-            const isExpanded = expanded.has(finding.id);
-            const needsTruncate = finding.content.length > 200;
-            const displayContent = isExpanded || !needsTruncate
-              ? finding.content
-              : finding.content.slice(0, 200) + '...';
-            const impactClass = IMPACT_COLORS[finding.metadata?.impact_level] || IMPACT_COLORS.low;
-            const totalTokens = (finding.metadata?.tokens?.prompt || 0) + (finding.metadata?.tokens?.completion || 0);
-
-            return (
-              <div key={finding.id} className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-                {/* Header row */}
-                <div className="flex items-center flex-wrap gap-2 mb-2">
-                  <span className="text-white text-sm font-medium">{finding.agent_name || 'Unknown Agent'}</span>
-                  {finding.rnd_division && (
-                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-500/20 text-indigo-400">
-                      {finding.rnd_division}
+      {/* Agents grid */}
+      <section>
+        <div style={{ ...mono, fontSize: 10, letterSpacing: '0.1em', color: 'var(--text-lo)', marginBottom: 12 }}>RESEARCH AGENTS</div>
+        {agents.length === 0 ? (
+          <div className="ops-panel" style={{ padding: '32px 16px', textAlign: 'center' }}>
+            <span style={{ ...mono, fontSize: 11, color: 'var(--text-lo)', opacity: 0.5 }}>No R&D agents registered. Start one with <code>--type rnd --division ai_ml_research</code></span>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+            {agents.map(agent => {
+              const divColor = DIVISION_COLOR[agent.rnd_division] || '#94a3b8';
+              const isRunning = executing === agent.id;
+              const output = liveOutput[agent.id];
+              return (
+                <div key={agent.id} className="ops-panel" style={{ padding: '14px 16px', borderLeft: `3px solid ${divColor}` }}>
+                  {/* Name + status */}
+                  <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
+                    <div className="flex items-center gap-2">
+                      <span style={{ width: 7, height: 7, borderRadius: '50%', background: agent.status === 'online' || agent.status === 'working' ? '#10b981' : '#475569', display: 'inline-block', flexShrink: 0 }} />
+                      <span style={{ ...mono, fontSize: 13, fontWeight: 700, color: 'var(--text-hi)' }}>{agent.name}</span>
+                    </div>
+                    <span style={{ ...mono, fontSize: 9, color: divColor, background: `${divColor}18`, border: `1px solid ${divColor}40`, borderRadius: 2, padding: '2px 6px', letterSpacing: '0.06em' }}>
+                      {(agent.rnd_division || '').replace(/_/g, ' ').toUpperCase()}
                     </span>
-                  )}
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${impactClass}`}>
-                    {finding.metadata?.impact_level || 'low'}
-                  </span>
-                  {finding.metadata?.skipped && (
-                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-500/20 text-purple-400">
-                      Simulated
-                    </span>
-                  )}
-                  <span className="text-gray-500 text-xs ml-auto">{timeAgo(finding.created_at)}</span>
-                </div>
+                  </div>
 
-                {/* Content */}
-                <div
-                  className={`text-gray-300 text-sm whitespace-pre-wrap mb-2 ${needsTruncate ? 'cursor-pointer' : ''}`}
-                  onClick={() => needsTruncate && toggleExpand(finding.id)}
-                >
-                  {displayContent}
-                </div>
-                {needsTruncate && (
+                  {/* Model + last run */}
+                  <div style={{ ...mono, fontSize: 10, color: 'var(--text-lo)', marginBottom: 10, display: 'flex', gap: 12 }}>
+                    <span style={{ color: '#818cf8' }}>{agent.model || 'claude-code'}</span>
+                    <span><Clock size={9} style={{ display: 'inline', marginRight: 3 }} />{timeAgo(agent.rnd_last_run)}</span>
+                  </div>
+
+                  {/* Schedule */}
+                  <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ ...mono, fontSize: 10, color: 'var(--text-lo)' }}>SCHEDULE</span>
+                    <select
+                      value={agent.rnd_schedule || 'daily'}
+                      onChange={e => handleScheduleChange(agent.id, e.target.value)}
+                      className="ops-input"
+                      style={{ ...mono, fontSize: 10, padding: '3px 6px', flex: 1 }}
+                    >
+                      {SCHEDULE_OPTIONS.map(opt => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                    {agent.scheduled && (
+                      <span style={{ ...mono, fontSize: 9, color: '#10b981' }}>● SCHED</span>
+                    )}
+                  </div>
+
+                  {/* Live output while running */}
+                  {output && (
+                    <div style={{ ...mono, fontSize: 10, color: isRunning ? '#86efac' : '#94a3b8', background: '#050e07', border: '1px solid #1a3a1a', borderRadius: 2, padding: '7px 10px', marginBottom: 10, maxHeight: 80, overflowY: 'auto', lineHeight: 1.5 }}>
+                      {output}
+                    </div>
+                  )}
+
+                  {/* Run button */}
                   <button
-                    onClick={() => toggleExpand(finding.id)}
-                    className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 mb-2"
+                    onClick={() => handleExecute(agent.id)}
+                    disabled={isRunning || !agent.is_approved}
+                    className="ops-btn"
+                    style={{ width: '100%', justifyContent: 'center', gap: 6, opacity: !agent.is_approved ? 0.4 : 1 }}
                   >
-                    {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                    {isExpanded ? 'Show less' : 'Show more'}
+                    {isRunning ? <><Loader2 size={11} className="animate-spin" /> RUNNING...</> : <><Play size={11} /> RUN NOW</>}
                   </button>
-                )}
-
-                {/* Footer: model + tokens + cost */}
-                <div className="flex items-center gap-3 text-xs text-gray-500">
-                  <span>{finding.metadata?.model || '—'}</span>
-                  <span>{totalTokens.toLocaleString()} tokens</span>
-                  <span>${(finding.metadata?.cost || 0).toFixed(4)}</span>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
+        )}
+      </section>
 
-          {feed.length === 0 && (
-            <div className="text-center py-12 text-gray-500">
-              No research findings yet. Run an agent to generate findings.
-            </div>
-          )}
+      {/* Research Feed */}
+      <section>
+        <div style={{ ...mono, fontSize: 10, letterSpacing: '0.1em', color: 'var(--text-lo)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Activity size={11} style={{ color: '#818cf8' }} />
+          RESEARCH FEED
+          <span style={{ ...mono, fontSize: 9, color: 'var(--text-lo)', background: 'var(--ink-3)', border: '1px solid var(--ink-4)', borderRadius: 2, padding: '1px 6px' }}>{feed.length}</span>
         </div>
-      </div>
+
+        {feed.length === 0 ? (
+          <div className="ops-panel" style={{ padding: '32px 16px', textAlign: 'center' }}>
+            <span style={{ ...mono, fontSize: 11, color: 'var(--text-lo)', opacity: 0.5 }}>No research findings yet. Run an agent to generate findings.</span>
+          </div>
+        ) : (
+          <div ref={feedRef} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {feed.map(finding => {
+              const impact  = finding.metadata?.impact_level || 'low';
+              const style   = IMPACT_STYLE[impact] || IMPACT_STYLE.low;
+              const divColor = DIVISION_COLOR[finding.rnd_division] || '#94a3b8';
+              const isExp   = expanded.has(finding.id);
+              const content = finding.content || '';
+              const long    = content.length > 300;
+              const display = isExp || !long ? content : content.slice(0, 300) + '…';
+
+              return (
+                <div key={finding.id} className="ops-panel" style={{ padding: '12px 16px', borderLeft: `3px solid ${style.color}` }}>
+                  {/* Header */}
+                  <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+                    <span style={{ ...mono, fontSize: 12, fontWeight: 700, color: 'var(--text-hi)' }}>{finding.agent_name || '?'}</span>
+                    {finding.rnd_division && (
+                      <span style={{ ...mono, fontSize: 9, color: divColor, background: `${divColor}18`, border: `1px solid ${divColor}40`, borderRadius: 2, padding: '2px 6px' }}>
+                        {finding.rnd_division.replace(/_/g, ' ').toUpperCase()}
+                      </span>
+                    )}
+                    <span style={{ ...mono, fontSize: 9, color: style.color, background: style.bg, border: `1px solid ${style.color}40`, borderRadius: 2, padding: '2px 6px', textTransform: 'uppercase' }}>
+                      {impact}
+                    </span>
+                    {finding.metadata?.skipped && (
+                      <span style={{ ...mono, fontSize: 9, color: '#a78bfa', background: 'rgba(167,139,250,0.1)', border: '1px solid rgba(167,139,250,0.3)', borderRadius: 2, padding: '2px 6px' }}>SIMULATED</span>
+                    )}
+                    <span style={{ ...mono, fontSize: 10, color: 'var(--text-lo)', marginLeft: 'auto' }}>{timeAgo(finding.created_at)}</span>
+                  </div>
+
+                  {/* Content */}
+                  <div
+                    style={{ ...mono, fontSize: 11, color: 'var(--text-hi)', lineHeight: 1.65, whiteSpace: 'pre-wrap', cursor: long ? 'pointer' : 'default', marginBottom: 8 }}
+                    onClick={() => long && setExpanded(prev => { const n = new Set(prev); n.has(finding.id) ? n.delete(finding.id) : n.add(finding.id); return n; })}
+                  >
+                    {display}
+                  </div>
+
+                  {long && (
+                    <button
+                      onClick={() => setExpanded(prev => { const n = new Set(prev); n.has(finding.id) ? n.delete(finding.id) : n.add(finding.id); return n; })}
+                      style={{ ...mono, fontSize: 10, color: '#818cf8', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, padding: 0, marginBottom: 8 }}
+                    >
+                      {isExp ? <><ChevronDown size={10} /> SHOW LESS</> : <><ChevronRight size={10} /> SHOW MORE</>}
+                    </button>
+                  )}
+
+                  {/* Footer */}
+                  <div style={{ ...mono, fontSize: 10, color: 'var(--text-lo)', display: 'flex', gap: 14 }}>
+                    <span style={{ color: '#818cf8' }}>{finding.metadata?.model || '—'}</span>
+                    <span><Zap size={9} style={{ display: 'inline', marginRight: 3 }} />{((finding.metadata?.tokens?.prompt || 0) + (finding.metadata?.tokens?.completion || 0)).toLocaleString()} tok</span>
+                    <span>${(finding.metadata?.cost || 0).toFixed(4)}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

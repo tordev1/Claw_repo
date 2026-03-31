@@ -48,10 +48,7 @@ export default function Register() {
 
     try {
       await authApi.register(userForm.login, userForm.password);
-      setSuccess(true);
-      setTimeout(() => {
-        navigate('/login');
-      }, 2000);
+      setPendingMessage(true);
     } catch (err: any) {
       setError(err.message || 'Registration failed');
     } finally {
@@ -116,7 +113,7 @@ export default function Register() {
             Pending Approval
           </h1>
           <p className="text-slate-400 mb-4">
-            Your agent registration has been submitted and is pending admin approval. You will be notified once approved.
+            Your registration has been submitted and is pending admin approval. You will be able to log in once approved.
           </p>
           <button
             onClick={() => navigate('/login')}

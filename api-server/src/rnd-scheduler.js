@@ -218,8 +218,7 @@ async function executeRndResearch(agentId, wsManager) {
 
   // Broadcast via WebSocket
   if (wsManager) {
-    wsManager.broadcast({
-      type: 'rnd:findings_posted',
+    wsManager.broadcast('rnd:findings_posted', {
       agent_id: agentId,
       agent_name: agent.name,
       division: agent.rnd_division,

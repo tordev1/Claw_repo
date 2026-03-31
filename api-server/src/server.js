@@ -66,13 +66,17 @@ async function buildServer() {
   await initDatabase();
 
   // Recover tasks stuck in 'running' from a previous server crash/restart.
-  // Any task still 'running' at boot was abandoned mid-execution.
+  // Only fail tasks that have been running longer than the executor timeout —
+  // tasks started recently may still be in-flight from the previous process.
   {
     const db = getDb();
     const now = new Date().toISOString();
+    const timeoutMs = parseInt(process.env.CLAUDE_TIMEOUT_MS || '120000', 10);
+    const cutoff = new Date(Date.now() - timeoutMs).toISOString();
     const { changes } = db.prepare(
-      `UPDATE tasks SET status='failed', result='AI execution failed: server restarted while task was in-flight', updated_at=? WHERE status='running'`
-    ).run(now);
+      `UPDATE tasks SET status='failed', result='AI execution failed: server restarted while task was in-flight', updated_at=?
+       WHERE status='running' AND (started_at IS NULL OR started_at < ?)`
+    ).run(now, cutoff);
     if (changes > 0) {
       fastify.log.warn(`[startup] Recovered ${changes} task(s) stuck in 'running' — marked failed`);
     }
@@ -335,6 +339,9 @@ async function buildServer() {
   }, routes.addTaskComment);
 
   // Task updates
+  fastify.get('/api/tasks/:id/workspace',      { preHandler: authMiddleware }, routes.getTaskWorkspace);
+  fastify.get('/api/tasks/:id/workspace/file', { preHandler: authMiddleware }, routes.getWorkspaceFile);
+  fastify.get('/api/tasks/:id/log',            { preHandler: authMiddleware }, routes.getTaskLog);
   fastify.get('/api/tasks/:id/updates', { preHandler: authMiddleware }, routes.getTaskUpdates);
   fastify.post('/api/tasks/:id/updates', {
     preHandler: authMiddleware,
@@ -529,6 +536,9 @@ async function buildServer() {
   fastify.get('/api/admin/agents/pending', { preHandler: authMiddleware }, routes.listPendingAgentsRoute);
   fastify.get('/api/admin/agents/approved', { preHandler: authMiddleware }, routes.listApprovedAgentsRoute);
   fastify.get('/api/admin/users', { preHandler: authMiddleware }, routes.listUsersRoute);
+  fastify.get('/api/admin/users/pending', { preHandler: authMiddleware }, routes.listPendingUsersRoute);
+  fastify.post('/api/admin/users/:id/approve', { preHandler: authMiddleware }, routes.approveUserRoute);
+  fastify.post('/api/admin/users/:id/reject', { preHandler: authMiddleware }, routes.rejectUserRoute);
   fastify.post('/api/agents/:id/status', { preHandler: [authMiddleware, validate(updateAgentStatusSchema)] }, routes.updateManagerAgentStatusRoute);
   fastify.patch('/api/agents/:id', { preHandler: [authMiddleware, validate(updateAgentSchema)] }, routes.patchManagerAgentRoute);
   fastify.post('/api/agents/:id/heartbeat', { preHandler: optionalAuthMiddleware }, routes.agentHeartbeatRoute);
@@ -812,35 +822,50 @@ async function start() {
     setInterval(() => {
       try {
         const db = getDb();
+        const now = new Date().toISOString();
         const staleThreshold = new Date(Date.now() - 90 * 1000).toISOString();
+
+        // Catch any active status — not just 'online' (agents can be 'working' or 'idle' too)
         const staleAgents = db.prepare(`
           SELECT id, name FROM manager_agents
-          WHERE status = 'online'
+          WHERE status IN ('online', 'working', 'idle')
             AND is_approved = 1
             AND id NOT LIKE 'sim-%'
             AND (last_heartbeat IS NULL OR last_heartbeat < ?)
         `).all(staleThreshold);
 
         for (const agent of staleAgents) {
-          const now = new Date().toISOString();
           db.prepare(`UPDATE manager_agents SET status = 'offline', updated_at = ? WHERE id = ?`)
             .run(now, agent.id);
           wsManager.broadcast('agent:status_changed', { agent_id: agent.id, agent_name: agent.name, status: 'offline' });
           console.log(`[Heartbeat] Agent ${agent.name} marked offline (no heartbeat)`);
 
-          // ── Task retry: reset any tasks this agent was running back to pending ──
-          const { changes: taskChanges } = db.prepare(
-            `UPDATE tasks SET status = 'pending', agent_id = NULL, updated_at = ? WHERE agent_id = ? AND status = 'running'`
-          ).run(now, agent.id);
-          if (taskChanges > 0) {
-            console.log(`[Heartbeat] Reset ${taskChanges} running task(s) from ${agent.name} → pending for re-assignment`);
-            // Trigger auto-assign for each reset task
+          // ── Task retry: reset running tasks for THIS agent only, then reassign ──
+          const droppedTasks = db.prepare(
+            `SELECT id, title FROM tasks WHERE agent_id = ? AND status = 'running'`
+          ).all(agent.id);
+
+          if (droppedTasks.length > 0) {
+            db.prepare(
+              `UPDATE tasks SET status = 'pending', agent_id = NULL, updated_at = ? WHERE agent_id = ? AND status = 'running'`
+            ).run(now, agent.id);
+
+            console.log(`[Heartbeat] Reset ${droppedTasks.length} task(s) from ${agent.name} → pending`);
+
+            // Notify via WS
+            for (const t of droppedTasks) {
+              wsManager.broadcast('task:agent_dropped', {
+                task_id: t.id, task_title: t.title,
+                agent_id: agent.id, agent_name: agent.name,
+              });
+            }
+
+            // Auto-reassign each dropped task specifically
             try {
               const { autoAssignTask } = require('./orchestration-engine');
-              const resetTasks = db.prepare(`SELECT id FROM tasks WHERE agent_id IS NULL AND status = 'pending'`).all();
-              for (const t of resetTasks) {
+              for (const t of droppedTasks) {
                 Promise.resolve(autoAssignTask(t.id, { assignedBy: 'system-retry' }))
-                  .catch(e => console.error('[Heartbeat] Auto-reassign failed:', e.message));
+                  .catch(e => console.error(`[Heartbeat] Reassign task ${t.id} failed:`, e.message));
               }
             } catch (e) {
               console.error('[Heartbeat] Task retry hook error:', e.message);

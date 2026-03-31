@@ -1,12 +1,136 @@
 /**
- * AI Executor — calls OpenRouter LLM to actually process tasks
+ * AI Executor — calls LLM / Claude Code CLI to actually process tasks
  * Used by POST /api/tasks/:id/execute
  */
 
 const http  = require('http');
 const https = require('https');
-const { spawnSync } = require('child_process');
+const fs    = require('fs');
+const path  = require('path');
+const { spawnSync, spawn } = require('child_process');
 const { loadPresetFile, extractSection } = require('./presets');
+
+// ── Claude Code CLI executor ──────────────────────────────────────────────────
+const WORKSPACES_DIR  = path.resolve(__dirname, '../../workspaces');
+const EXEC_LOGS_DIR   = path.resolve(__dirname, '../../logs/executions');
+
+function ensureWorkspace(taskId) {
+  const dir = path.join(WORKSPACES_DIR, taskId);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function listWorkspaceFiles(workspacePath) {
+  try {
+    return fs.readdirSync(workspacePath)
+      .filter(f => !f.startsWith('.') && f !== 'node_modules');
+  } catch { return []; }
+}
+
+function resolveToolsForAgent(agent) {
+  const type   = agent.agent_type || 'worker';
+  const skills = (() => { try { return JSON.parse(agent.skills || '[]'); } catch { return []; } })();
+  const allSkills = [type, ...skills].map(s => s.toLowerCase());
+
+  // PM and R&D agents: read-only by default — they plan and research, don't modify code
+  if (type === 'pm')  return ['Read', 'Glob', 'Grep', 'Bash(echo:*)'];
+  if (type === 'rnd') return ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch'];
+
+  // Workers with readonly skill: no writes or bash
+  if (allSkills.includes('readonly')) return ['Read', 'Glob', 'Grep'];
+
+  // Default worker: full access
+  return null; // null = don't pass --allowedTools, Claude gets everything
+}
+
+function callClaudeCLI(prompt, workspacePath, toolsOverride, timeoutMs = 120000, onChunk = null) {
+  const args = ['--print', '--dangerously-skip-permissions', '--input-format', 'text'];
+  if (toolsOverride && toolsOverride.length > 0) {
+    args.push('--allowedTools', toolsOverride.join(','));
+  }
+
+  // Streaming mode — used when live WS broadcast is needed
+  if (onChunk) {
+    return new Promise((resolve, reject) => {
+      const proc = spawn('claude', args, {
+        cwd:   workspacePath,
+        env:   { ...process.env, FORCE_COLOR: '0' },
+        shell: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+
+      // Feed prompt via stdin
+      proc.stdin.write(prompt);
+      proc.stdin.end();
+
+      let fullOutput = '';
+      const timer = setTimeout(() => {
+        proc.kill();
+        reject(new Error(`claude timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      proc.stdout.on('data', chunk => {
+        const text = chunk.toString();
+        fullOutput += text;
+        try { onChunk(text); } catch (_) {}
+      });
+
+      proc.stderr.on('data', chunk => {
+        // Forward stderr as dimmed stream updates too
+        try { onChunk(`\x1b[2m${chunk.toString()}\x1b[0m`); } catch (_) {}
+      });
+
+      proc.on('close', code => {
+        clearTimeout(timer);
+        if (code !== 0 && !fullOutput) {
+          reject(new Error(`claude exited ${code}`));
+        } else {
+          resolve(fullOutput.trim() || '(no output)');
+        }
+      });
+
+      proc.on('error', err => { clearTimeout(timer); reject(err); });
+    });
+  }
+
+  // Sync fallback (no streaming needed)
+  const result = spawnSync('claude', args, {
+    cwd:       workspacePath,
+    input:     prompt,
+    encoding:  'utf8',
+    timeout:   timeoutMs,
+    maxBuffer: 10 * 1024 * 1024,
+    env:       { ...process.env, FORCE_COLOR: '0' },
+    shell:     true,
+  });
+
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const stderr = (result.stderr || '').trim();
+    throw new Error(`claude exited ${result.status}: ${stderr.substring(0, 400)}`);
+  }
+  return (result.stdout || '').trim() || '(no output)';
+}
+
+function saveExecutionLog(taskId, content) {
+  try {
+    if (!fs.existsSync(EXEC_LOGS_DIR)) fs.mkdirSync(EXEC_LOGS_DIR, { recursive: true });
+    const logPath = path.join(EXEC_LOGS_DIR, `${taskId}.log`);
+    fs.writeFileSync(logPath, content, 'utf8');
+    return logPath;
+  } catch { return null; }
+}
+
+function buildSessionContext(agent) {
+  try {
+    const state = JSON.parse(agent.session_state || '{}');
+    if (!state.recent_work || state.recent_work.length === 0) return '';
+    const lines = state.recent_work.slice(-3).map(w =>
+      `- "${w.task}"${w.files?.length ? ` → created: ${w.files.join(', ')}` : ''}`
+    );
+    return `\nYour recent work history:\n${lines.join('\n')}\n`;
+  } catch { return ''; }
+}
 
 // ── OpenClaw config ───────────────────────────────────────────────────────────
 const OPENCLAW_AGENT_ID  = process.env.OPENCLAW_AGENT_ID  || 'main';
@@ -305,7 +429,8 @@ function selectModel(agent) {
 function normalizeProvider(value) {
   const v = String(value || '').toLowerCase().trim();
   if (!v) return null;
-  if (v === 'claude' || v === 'anthropic' || v === 'openrouter') return 'openrouter';
+  if (v === 'claude' || v === 'claude-code' || v === 'claudecode') return 'claude';
+  if (v === 'anthropic' || v === 'openrouter') return 'openrouter';
   if (v === 'ollama') return 'ollama';
   if (v === 'openclaw') return 'openclaw';
   if (v === 'auto' || v === 'simulation') return v;
@@ -337,7 +462,7 @@ function estimateCost(model, promptTokens, completionTokens, pricingOverride = n
 }
 
 // ── Main executor ─────────────────────────────────────────────────────────────
-async function executeTask(task, agent, project) {
+async function executeTask(task, agent, project, onChunk = null) {
   const apiKey     = process.env.OPENROUTER_API_KEY;
   const envProvider = (process.env.AI_PROVIDER || 'auto').toLowerCase();
 
@@ -370,9 +495,9 @@ async function executeTask(task, agent, project) {
   if (agent.ollama_host) {
     provider = 'ollama';
   } else if (provider === 'auto') {
-    const ocCheck = spawnSync('openclaw', ['--version'], { shell: true, encoding: 'utf8', timeout: 5000 });
-    if (ocCheck.status === 0) {
-      provider = 'openclaw';
+    const claudeCheck = spawnSync('claude', ['--version'], { shell: true, encoding: 'utf8', timeout: 5000 });
+    if (claudeCheck.status === 0) {
+      provider = 'claude';
     } else if (await isOllamaReachable()) {
       provider = 'ollama';
     } else if (apiKey) {
@@ -430,6 +555,53 @@ async function executeTask(task, agent, project) {
         total:      promptTokens + completionTokens,
       },
       cost,
+    };
+  }
+
+  // ── Claude Code CLI ───────────────────────────────────────────────────────
+  if (provider === 'claude') {
+    const workspacePath = ensureWorkspace(task.id);
+    const agentTypeLabel = agent.agent_type === 'pm' ? 'Project Manager' :
+                           agent.agent_type === 'rnd' ? 'R&D Researcher' : 'Worker';
+
+    const sessionCtx = buildSessionContext(agent);
+
+    const taskPrompt = [
+      `You are ${agent.name}, an AI ${agentTypeLabel} agent.`,
+      sessionCtx || null,
+      `Project: ${project?.name || 'Unknown'}`,
+      `Task: ${task.title}`,
+      task.description ? `Description: ${task.description}` : null,
+      `Priority: ${task.priority === 1 ? 'critical' : task.priority === 2 ? 'normal' : 'low'}`,
+      ``,
+      `Your working directory is: ${workspacePath}`,
+      ``,
+      `Complete this task. Write actual files, run code, and do real work using your tools.`,
+      `When done, summarize what you did and list any files you created or modified.`,
+    ].filter(Boolean).join('\n');
+
+    const timeoutMs    = parseInt(process.env.CLAUDE_TIMEOUT_MS || '120000', 10);
+    const allowedTools = resolveToolsForAgent(agent);
+    const output = await callClaudeCLI(taskPrompt, workspacePath, allowedTools, timeoutMs, onChunk);
+    const files = listWorkspaceFiles(workspacePath);
+    const filesNote = files.length > 0
+      ? `\n\n---\n**Workspace files:** ${files.join(', ')}`
+      : '';
+
+    const logPath = saveExecutionLog(task.id, output);
+
+    return {
+      success:        true,
+      skipped:        false,
+      provider:       'claude',
+      cost_mode:      'none',
+      result:         output + filesNote,
+      model:          'claude-code',
+      tokens:         null,
+      cost:           null,
+      workspace_path: workspacePath,
+      log_path:       logPath,
+      files_created:  files,
     };
   }
 

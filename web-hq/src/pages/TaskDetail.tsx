@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { tasksApi, userSession } from '../services/api';
-import { Loader2, ChevronLeft, ChevronDown, ChevronRight } from 'lucide-react';
+import { tasksApi, userSession, fetchApi } from '../services/api';
+import { Loader2, ChevronLeft, ChevronDown, ChevronRight, FolderOpen, FileText, Terminal } from 'lucide-react';
 
 const STATUS_COLOR: Record<string, string> = { pending: '#faa81a', running: '#818cf8', completed: '#10b981', failed: '#f97316', cancelled: '#ef4444' };
 const PRI_COLOR: Record<string, string> = { critical: '#ef4444', high: '#f97316', medium: '#faa81a', low: '#64748b' };
@@ -19,6 +19,14 @@ export default function TaskDetail() {
   const [error, setError] = useState<string | null>(null);
   const [resultOpen, setResultOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [liveStream, setLiveStream] = useState<string>('');
+  const [streaming, setStreaming] = useState(false);
+  const streamRef = useRef<HTMLPreElement>(null);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
+  const [workspaceFiles, setWorkspaceFiles] = useState<any[]>([]);
+  const [selectedFile, setSelectedFile] = useState<{ name: string; content: string } | null>(null);
+  const [execLog, setExecLog] = useState<string | null>(null);
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const commentRef = useRef<HTMLTextAreaElement>(null);
@@ -41,6 +49,57 @@ export default function TaskDetail() {
   }
 
   useEffect(() => { load(); }, [id]);
+
+  // Subscribe to live execution stream for this task
+  useEffect(() => {
+    if (!id) return;
+    const onStream = (data: any) => {
+      if (data?.task_id !== id) return;
+      setStreaming(true);
+      setLiveStream(prev => prev + (data.chunk || ''));
+      // Auto-scroll
+      requestAnimationFrame(() => {
+        if (streamRef.current) streamRef.current.scrollTop = streamRef.current.scrollHeight;
+      });
+    };
+    const onComplete = (data: any) => {
+      if (data?.task_id !== id) return;
+      setStreaming(false);
+      load(); // Refresh task to show completed state
+    };
+    wsClient.on('task:execution_stream', onStream);
+    wsClient.on('task:completed', onComplete);
+    wsClient.on('task:failed', onComplete);
+    return () => {
+      wsClient.off('task:execution_stream', onStream);
+      wsClient.off('task:completed', onComplete);
+      wsClient.off('task:failed', onComplete);
+    };
+  }, [id]);
+
+  async function loadWorkspace() {
+    if (!id) return;
+    try {
+      const data = await fetchApi(`/api/tasks/${id}/workspace`);
+      setWorkspaceFiles(data.files || []);
+    } catch { setWorkspaceFiles([]); }
+  }
+
+  async function loadFile(name: string) {
+    if (!id) return;
+    try {
+      const data = await fetchApi(`/api/tasks/${id}/workspace/file?name=${encodeURIComponent(name)}`);
+      setSelectedFile({ name, content: data.content || '' });
+    } catch { setSelectedFile({ name, content: '(failed to load)' }); }
+  }
+
+  async function loadLog() {
+    if (!id) return;
+    try {
+      const data = await fetchApi(`/api/tasks/${id}/log`);
+      setExecLog(data.log || null);
+    } catch { setExecLog(null); }
+  }
 
   async function handleComment(e: React.FormEvent) {
     e.preventDefault();
@@ -154,6 +213,87 @@ export default function TaskDetail() {
           </button>
           {resultOpen && (
             <pre style={{ ...mono, fontSize: 11, color: 'var(--text-hi)', padding: '14px 16px', margin: 0, overflowX: 'auto', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{resultText}</pre>
+          )}
+        </div>
+      )}
+
+      {/* Live Execution Stream */}
+      {(task.status === 'running' || liveStream) && (
+        <div className="ops-panel" style={{ padding: 0, overflow: 'hidden', border: streaming ? '1px solid #22c55e' : '1px solid var(--ink-4)' }}>
+          <div style={{ ...mono, fontSize: 10, letterSpacing: '0.1em', color: '#22c55e', background: 'rgba(34,197,94,0.07)', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid var(--ink-4)' }}>
+            <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: streaming ? '#22c55e' : '#64748b', boxShadow: streaming ? '0 0 6px #22c55e' : 'none' }} />
+            {streaming ? 'LIVE — CLAUDE IS WORKING' : 'EXECUTION COMPLETE'}
+          </div>
+          <pre
+            ref={streamRef}
+            style={{ ...mono, fontSize: 11, color: '#d1fae5', background: '#050e07', padding: '12px 16px', margin: 0, overflowY: 'auto', whiteSpace: 'pre-wrap', lineHeight: 1.7, maxHeight: 420, wordBreak: 'break-word' }}
+          >{liveStream || '— waiting for output —'}</pre>
+        </div>
+      )}
+
+      {/* Workspace Files */}
+      {task.status === 'completed' && (
+        <div className="ops-panel" style={{ padding: 0, overflow: 'hidden' }}>
+          <button
+            onClick={() => { setWorkspaceOpen(o => !o); if (!workspaceOpen) loadWorkspace(); }}
+            style={{ ...mono, fontSize: 10, letterSpacing: '0.1em', color: '#10b981', background: 'rgba(16,185,129,0.06)', border: 'none', borderBottom: workspaceOpen ? '1px solid var(--ink-4)' : 'none', cursor: 'pointer', padding: '10px 16px', width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            {workspaceOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+            <FolderOpen size={11} />
+            WORKSPACE FILES {workspaceFiles.length > 0 && `(${workspaceFiles.length})`}
+          </button>
+          {workspaceOpen && (
+            <div style={{ padding: '12px 16px' }}>
+              {workspaceFiles.length === 0
+                ? <span style={{ ...mono, fontSize: 11, color: 'var(--text-lo)', opacity: 0.5 }}>— no files in workspace —</span>
+                : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {workspaceFiles.map(f => (
+                      <button
+                        key={f.name}
+                        onClick={() => loadFile(f.name)}
+                        style={{ ...mono, fontSize: 11, color: selectedFile?.name === f.name ? '#10b981' : 'var(--amber)', background: selectedFile?.name === f.name ? 'rgba(16,185,129,0.08)' : 'none', border: '1px solid ' + (selectedFile?.name === f.name ? '#10b981' : 'var(--ink-4)'), borderRadius: 2, padding: '5px 10px', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+                      >
+                        <FileText size={10} />
+                        {f.name}
+                        <span style={{ color: 'var(--text-lo)', marginLeft: 'auto' }}>{(f.size / 1024).toFixed(1)}kb</span>
+                      </button>
+                    ))}
+                  </div>
+                )
+              }
+              {selectedFile && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ ...mono, fontSize: 10, color: 'var(--text-lo)', marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
+                    <span>{selectedFile.name}</span>
+                    <button onClick={() => setSelectedFile(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-lo)', fontSize: 10 }}>✕ close</button>
+                  </div>
+                  <pre style={{ ...mono, fontSize: 11, color: 'var(--text-hi)', background: 'var(--ink-2)', border: '1px solid var(--ink-4)', borderRadius: 2, padding: '12px 14px', margin: 0, overflowX: 'auto', whiteSpace: 'pre-wrap', lineHeight: 1.6, maxHeight: 400 }}>{selectedFile.content}</pre>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Execution Log */}
+      {task.status === 'completed' && (
+        <div className="ops-panel" style={{ padding: 0, overflow: 'hidden' }}>
+          <button
+            onClick={() => { setLogOpen(o => !o); if (!logOpen) loadLog(); }}
+            style={{ ...mono, fontSize: 10, letterSpacing: '0.1em', color: '#818cf8', background: 'rgba(129,140,248,0.06)', border: 'none', borderBottom: logOpen ? '1px solid var(--ink-4)' : 'none', cursor: 'pointer', padding: '10px 16px', width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            {logOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+            <Terminal size={11} />
+            EXECUTION LOG
+          </button>
+          {logOpen && (
+            <div style={{ padding: '12px 16px' }}>
+              {execLog == null
+                ? <span style={{ ...mono, fontSize: 11, color: 'var(--text-lo)', opacity: 0.5 }}>— no execution log available —</span>
+                : <pre style={{ ...mono, fontSize: 10, color: '#a3e635', background: '#0a0f0a', border: '1px solid #1a2e1a', borderRadius: 2, padding: '12px 14px', margin: 0, overflowX: 'auto', whiteSpace: 'pre-wrap', lineHeight: 1.6, maxHeight: 500 }}>{execLog}</pre>
+              }
+            </div>
           )}
         </div>
       )}

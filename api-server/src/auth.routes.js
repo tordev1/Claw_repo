@@ -38,10 +38,10 @@ async function login(req, reply) {
       return { error: 'INVALID_CREDENTIALS', message: 'Invalid login or password' };
     }
 
-    // Check if user is active
+    // Check if user is active (approved)
     if (user.is_active === false || user.is_active === 0) {
       reply.code(403);
-      return { error: 'ACCOUNT_DISABLED', message: 'Account has been disabled' };
+      return { error: 'ACCOUNT_PENDING', message: 'Your account is pending admin approval.' };
     }
 
     // Create token pair
@@ -185,7 +185,7 @@ async function getCurrentUser(req, reply) {
  */
 async function register(req, reply) {
   try {
-    const { name, login, email, password, role = 'user' } = req.body;
+    const { name, login, email, password } = req.body;
 
     // Validate required fields
     if (!name || !login || !email || !password) {
@@ -206,7 +206,7 @@ async function register(req, reply) {
 
     // Check for existing user
     const existing = db.prepare(`
-      SELECT * FROM users 
+      SELECT * FROM users
       WHERE login = ? OR email = ?
     `).get(login, email);
 
@@ -218,31 +218,28 @@ async function register(req, reply) {
     // Hash password
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // Create user
+    // Create user — always role=user, is_active=FALSE (pending admin approval)
     const { v4: uuidv4 } = require('uuid');
     const userId = uuidv4();
 
     db.prepare(`
       INSERT INTO users (id, name, login, email, password_hash, role, is_active, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, TRUE, datetime('now'))
-    `).run(userId, name, login, email, passwordHash, role);
+      VALUES (?, ?, ?, ?, ?, 'user', FALSE, datetime('now'))
+    `).run(userId, name, login, email, passwordHash);
 
-    // Create token pair for immediate login
-    const { accessToken, refreshToken } = await createTokenPair(userId);
+    // Notify admin via WebSocket
+    try {
+      const wsManager = require('./websocket');
+      wsManager.broadcast('user:registered', { user: { id: userId, name, login, email, role: 'user' } });
+    } catch (_) {}
 
+    // Return pending status — no token until approved
+    reply.code(201);
     return {
       success: true,
-      message: 'User registered successfully',
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      expires_in: 900,
-      user: {
-        id: userId,
-        name,
-        login,
-        email,
-        role
-      }
+      pending: true,
+      message: 'Registration submitted. Waiting for admin approval.',
+      user: { id: userId, name, login, email, role: 'user' }
     };
 
   } catch (error) {

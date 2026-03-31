@@ -290,6 +290,25 @@ function dispatch(msg) {
     STATS.events['agent:assigned_to_project']++;
     console.log(`[notifier] agent:assigned_to_project → ${agent} → ${proj}`);
     sendTelegram(`🔗 <b>${escapeHtml(agent)}</b> joined project <b>${escapeHtml(proj)}</b>`).catch(() => {});
+
+  } else if (type === 'task:agent_dropped') {
+    const agent = payload.agent_name || payload.agent_id || '?';
+    const task  = payload.task_title || payload.task_id  || '?';
+    const key   = `dropped:${payload.task_id}`;
+    if (isDuplicate(key)) return;
+    console.log(`[notifier] task:agent_dropped → ${agent} dropped "${task}"`);
+    sendTelegram(
+      `⚠️ <b>Agent dropped mid-task</b>\n\n` +
+      `Agent <b>${escapeHtml(agent)}</b> went offline.\n` +
+      `Task <b>${escapeHtml(task)}</b> has been reset and queued for re-assignment.`
+    ).catch(() => {});
+
+  } else if (type === 'agent:status_changed' && payload.status === 'offline') {
+    const agent = payload.agent_name || payload.agent_id || '?';
+    const key   = `offline:${payload.agent_id}`;
+    if (isDuplicate(key)) return;
+    console.log(`[notifier] agent offline → ${agent}`);
+    sendTelegram(`📴 Agent <b>${escapeHtml(agent)}</b> went offline`).catch(() => {});
   }
 }
 
