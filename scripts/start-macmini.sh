@@ -12,7 +12,7 @@ export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH"
 
 export API_URL="${API_URL:-http://192.168.1.86:3001}"
 export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://localhost:11434}"
-export MACHINE_IP="${MACHINE_IP:-$(hostname -I 2>/dev/null | awk '{print $1}' || echo '127.0.0.1')}"
+export MACHINE_IP="${MACHINE_IP:-$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || ifconfig 2>/dev/null | grep 'inet ' | grep -v 127 | awk '{print $2}' | head -1 || echo '127.0.0.1')}"
 export OLLAMA_MODEL_WORKER="${OLLAMA_MODEL_WORKER:-huihui_ai/qwen3.5-abliterated:9b-Claude}"
 
 mkdir -p "$LOG_DIR"
